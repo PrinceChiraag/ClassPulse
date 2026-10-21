@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>ClassPulse Classroom</title>
+    <link rel="stylesheet" href="/static/dashboard.css" />
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <meta name="theme-color" content="#087f78" />
+</head>
+<body>
+    <div class="portal-shell">
+        <aside class="sidebar">
+            <div class="brand-block">
+                <div class="brand-mark">CP</div>
+                <div>
+                    <p class="brand-title">ClassPulse</p>
+                    <span class="brand-subtitle">Education Portal</span>
+                </div>
+            </div>
+
+            <nav class="nav-menu">
+                <a class="nav-item" href="/overview">Overview</a>
+                <a class="nav-item active" href="/classroom">Classroom</a>
+                <a class="nav-item" href="/camera">Camera</a>
+                <a class="nav-item" href="/camera-settings">Camera settings</a>
+                <a class="nav-item" href="/settings">Settings</a>
+            </nav>
+
+            <button id="theme-toggle" class="theme-toggle" type="button" aria-pressed="false">
+                <span class="theme-icon" aria-hidden="true">☾</span><span class="theme-label">Night mode</span>
+            </button>
+
+            <div class="sidebar-card">
+                <p class="mini-label">Room status</p>
+                <strong>Focused room view</strong>
+                <span>Live classroom insights</span>
+            </div>
+        </aside>
+
+        <main class="main-panel">
+            <header class="topbar">
+                <div>
+                    <p class="eyebrow">Classroom intelligence</p>
+                    <h1>Classroom insights</h1>
+                    <p class="portal-subtitle">Review temporary room-level cues. Outputs are heuristic and are not a measure of student performance.</p>
+                    {% if teacher %}
+                        <div class="teacher-badge">
+                            <span>Teacher:</span>
+                            <strong>{{ teacher.name }}</strong>
+                            {% if teacher.department %}
+                                <small>• {{ teacher.department }}</small>
+                            {% endif %}
+                        </div>
+                    {% endif %}
+                </div>
+                <div class="header-actions">
+                    <button id="sync-dashboard" class="secondary-button">Refresh room</button>
+                    <button id="logout-button" class="secondary-button">Logout</button>
+                </div>
+            </header>
+
+            <section class="summary-grid">
+                <article class="card highlight">
+                    <p class="card-label">Average attention cue</p>
+                    <div class="metric" id="avg-attention">--</div>
+                    <span class="trend positive" id="attention-trend">Stable</span>
+                </article>
+                <article class="card">
+                    <p class="card-label">Fatigue alerts</p>
+                    <div class="metric" id="fatigue-alerts">--</div>
+                    <span class="trend neutral" id="fatigue-trend">Room monitor</span>
+                </article>
+                <article class="card">
+                    <p class="card-label">Scans this session</p>
+                    <div class="metric" id="active-students">--</div>
+                    <span class="trend neutral">Tracked</span>
+                </article>
+                <article class="card status-card">
+                    <p class="card-label">Room status</p>
+                    <div class="metric status" id="room-status">--</div>
+                    <span class="trend neutral" id="status-detail">Awaiting data</span>
+                </article>
+            </section>
+
+            <section class="content-grid">
+                <div class="panel camera-panel">
+                    <div class="panel-header">
+                        <h2>Room snapshot</h2>
+                    </div>
+                    <div class="room-snapshot" aria-label="Latest room snapshot">
+                        <div class="room-snapshot-mark">CP</div>
+                        <strong id="room-status-display">Waiting for scan</strong>
+                        <span>Return to Overview to capture a classroom frame.</span>
+                    </div>
+                </div>
+
+                <div class="panel analytics-panel">
+                    <div class="panel-header">
+                        <h2>Classroom insights</h2>
+                    </div>
+                    <div class="mini-stat-row"><span>Eye engagement</span><strong id="eye-engagement">--</strong></div>
+                    <div class="mini-stat-row"><span>Posture score</span><strong id="posture-score">--</strong></div>
+                    <div class="mini-stat-row"><span>Last refresh</span><strong id="last-refresh">--</strong></div>
+                    <div class="notes-box">
+                        <h3>Recommended action</h3>
+                        <p id="recommended-action">The system will suggest the next classroom action after the first scan.</p>
+                    </div>
+                </div>
+            </section>
+
+            <section class="bottom-grid">
+                <div class="panel roster-panel">
+                    <div class="panel-header"><h2>Student roster</h2></div>
+                    <div id="student-roster" class="student-roster"></div>
+                </div>
+
+                <div class="panel alert-panel">
+                    <div class="panel-header"><h2>Attention heatmap</h2></div>
+                    <div id="heatmap" class="heatmap"></div>
+                    <div class="panel-header sub-header"><h2>Active alerts</h2></div>
+                    <ul id="alert-list" class="alert-list"></ul>
+                </div>
+            </section>
+
+            <section class="panel detail-panel">
+                <div class="panel-header"><h2>Student progress comparison</h2><a class="secondary-button page-link-button" href="/overview#student-scan-history">Capture a new scan</a></div>
+                <p class="portal-subtitle">Compare records saved with explicit teacher consent. Apply your institution's student data retention rules.</p>
+                <div class="student-scan-filters"><label>Filter by class<input id="classroom-filter-class" placeholder="Any class" /></label><label>Filter by roll number<input id="classroom-filter-roll" placeholder="Any roll number" /></label></div>
+                <div id="classroom-student-comparison" class="student-scan-history"><p class="empty-state">Loading saved student scans…</p></div>
+            </section>
+        </main>
+    </div>
+
+    <script src="/static/theme.js"></script>
+    <script src="/static/dashboard.js"></script>
+</body>
+</html>

@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>ClassPulse Settings</title>
+    <link rel="stylesheet" href="/static/dashboard.css" />
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <meta name="theme-color" content="#087f78" />
+</head>
+<body>
+    <div class="portal-shell">
+        <aside class="sidebar">
+            <div class="brand-block">
+                <div class="brand-mark">CP</div>
+                <div>
+                    <p class="brand-title">ClassPulse</p>
+                    <span class="brand-subtitle">Education Portal</span>
+                </div>
+            </div>
+
+            <nav class="nav-menu">
+                <a class="nav-item" href="/overview">Overview</a>
+                <a class="nav-item" href="/classroom">Classroom</a>
+                <a class="nav-item" href="/camera">Camera</a>
+                <a class="nav-item" href="/camera-settings">Camera settings</a>
+                <a class="nav-item active" href="/settings">Settings</a>
+            </nav>
+
+            <button id="theme-toggle" class="theme-toggle" type="button" aria-pressed="false">
+                <span class="theme-icon" aria-hidden="true">☾</span><span class="theme-label">Night mode</span>
+            </button>
+
+            <div class="sidebar-card">
+                <p class="mini-label">System config</p>
+                <strong>All monitoring options enabled</strong>
+                <span>Real-time classroom controls</span>
+            </div>
+        </aside>
+
+        <main class="main-panel">
+            <header class="topbar">
+                <div>
+                    <p class="eyebrow">Advanced classroom options</p>
+                    <h1>System settings</h1>
+                    {% if teacher %}
+                        <div class="teacher-badge">
+                            <span>Teacher:</span>
+                            <strong>{{ teacher.name }}</strong>
+                            {% if teacher.department %}
+                                <small>• {{ teacher.department }}</small>
+                            {% endif %}
+                        </div>
+                    {% endif %}
+                </div>
+                <div class="header-actions">
+                    <button id="save-settings" class="primary-button">Save settings</button>
+                    <button id="logout-button" class="secondary-button">Logout</button>
+                </div>
+            </header>
+
+            <section class="panel control-strip">
+                <div class="control-group" id="option-controls">
+                    <label class="option-toggle">
+                        <input type="checkbox" data-option="student_tracking" checked />
+                        <span>Student tracking</span>
+                    </label>
+                    <label class="option-toggle">
+                        <input type="checkbox" data-option="fatigue_detection" checked />
+                        <span>Fatigue detection</span>
+                    </label>
+                    <label class="option-toggle">
+                        <input type="checkbox" data-option="posture_analysis" checked />
+                        <span>Posture analysis</span>
+                    </label>
+                    <label class="option-toggle">
+                        <input type="checkbox" data-option="privacy_mode" checked />
+                        <span>Privacy blur</span>
+                    </label>
+                    <label class="option-toggle">
+                        <input type="checkbox" data-option="auto_refresh" checked />
+                        <span>Auto refresh</span>
+                    </label>
+                </div>
+
+                <label class="select-field" for="analysis-mode">
+                    <span>Analysis mode</span>
+                    <select id="analysis-mode">
+                        <option>Lecture mode</option>
+                        <option>Exam mode</option>
+                        <option>Group review</option>
+                        <option>Hands-on lab</option>
+                    </select>
+                </label>
+
+                <label class="select-field" for="camera-source">
+                    <span>Camera source</span>
+                    <select id="camera-source">
+                        <option value="default">Default laptop camera</option>
+                    </select>
+                </label>
+
+                <label class="select-field" for="detection-mode">
+                    <span>Detection mode</span>
+                    <select id="detection-mode">
+                        <option value="single-user">Single-user mode</option>
+                        <option value="multi-face">Multi-face classroom scan</option>
+                    </select>
+                </label>
+
+                <label class="slider-field" for="ear-blink-cutoff">
+                    <span>EAR blink cutoff</span>
+                    <div class="slider-row">
+                        <input id="ear-blink-cutoff" type="range" min="0.10" max="0.35" step="0.01" value="0.18" />
+                        <strong id="ear-blink-cutoff-label">0.18</strong>
+                    </div>
+                </label>
+
+                <label class="slider-field" for="mar-yawn-sensitivity">
+                    <span>MAR yawn sensitivity</span>
+                    <div class="slider-row">
+                        <input id="mar-yawn-sensitivity" type="range" min="0.10" max="0.45" step="0.01" value="0.24" />
+                        <strong id="mar-yawn-sensitivity-label">0.24</strong>
+                    </div>
+                </label>
+
+                <label class="slider-field" for="posture-tilt-degrees">
+                    <span>Posture tilt</span>
+                    <div class="slider-row">
+                        <input id="posture-tilt-degrees" type="range" min="5" max="40" step="1" value="18" />
+                        <strong id="posture-tilt-degrees-label">18°</strong>
+                    </div>
+                </label>
+
+                <label class="slider-field" for="alert-threshold">
+                    <span>Alert threshold</span>
+                    <div class="slider-row">
+                        <input id="alert-threshold" type="range" min="0.3" max="0.95" step="0.05" value="0.7" />
+                        <strong id="alert-threshold-label">0.70</strong>
+                    </div>
+                </label>
+            </section>
+
+            <section class="panel detail-panel">
+                <div class="panel-header"><h2>Current configuration</h2></div>
+                <div class="detail-grid">
+                    <div class="detail-card"><span>Student tracking</span><strong id="tracking-status">On</strong></div>
+                    <div class="detail-card"><span>Fatigue detection</span><strong id="fatigue-status">On</strong></div>
+                    <div class="detail-card"><span>Privacy mode</span><strong id="privacy-status">On</strong></div>
+                    <div class="detail-card"><span>Auto refresh</span><strong id="refresh-status">On</strong></div>
+                </div>
+            </section>
+            <section class="panel notes-box settings-note">
+                <h2>Privacy and processing</h2>
+                <p>Live preview appears only on Overview. Captured frames are analyzed in memory. Images are retained in the teacher database only when the save checkbox is selected and a student identity is provided.</p>
+                <div class="settings-feature-grid">
+                    <div><strong>Student tracking</strong><span>Enable multi-face group analysis</span></div>
+                    <div><strong>Fatigue sensitivity</strong><span>Tune eye and yawn thresholds</span></div>
+                    <div><strong>Alert threshold</strong><span>Choose when a reading needs review</span></div>
+                </div>
+            </section>
+        </main>
+    </div>
+
+    <script src="/static/theme.js"></script>
+    <script src="/static/dashboard.js"></script>
+</body>
+</html>

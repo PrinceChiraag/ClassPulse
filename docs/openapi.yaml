@@ -1,0 +1,115 @@
+openapi: 3.0.3
+info:
+  title: ClassPulse Mobile API
+  version: 1.0.0
+  description: Versioned JSON API for native camera clients and the ClassPulse dashboard.
+servers:
+  - url: https://your-classpulse-host
+security:
+  - bearerAuth: []
+paths:
+  /api/v1/auth/login:
+    post:
+      security: []
+      summary: Sign in and receive a short-lived bearer token
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password]
+              properties:
+                email: { type: string, format: email }
+                password: { type: string, format: password }
+      responses:
+        '200':
+          description: Access token and teacher profile
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean }
+                  access_token: { type: string }
+                  token_type: { type: string, example: Bearer }
+                  expires_in: { type: integer, example: 43200 }
+                  teacher: { type: object }
+        '401': { description: Invalid credentials }
+  /api/v1/auth/me:
+    get:
+      summary: Read the signed-in teacher profile
+      responses:
+        '200': { description: Authenticated teacher profile }
+        '401': { description: Missing, invalid, or expired token }
+  /api/v1/auth/logout:
+    post:
+      summary: End the client session
+      responses:
+        '200': { description: Delete the token from the device }
+        '401': { description: Missing, invalid, or expired token }
+  /api/v1/scan:
+    post:
+      summary: Analyze one camera frame for faces, fatigue cues, and phone objects
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [image_data]
+              properties:
+                image_data:
+                  type: string
+                  description: Base64-encoded JPEG bytes or a JPEG data URL; request body limit is 8 MiB and decoded images are limited to 12 megapixels.
+                detection_mode:
+                  type: string
+                  enum: [single-user, multi-face]
+                  default: multi-face
+                detection_settings: { type: object }
+      responses:
+        '200':
+          description: Scan result, including phone_detections and phone_detection_status
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string }
+                  face_count: { type: integer }
+                  faces: { type: array, items: { type: object } }
+                  phone_alert: { type: boolean }
+                  phone_detection_status: { type: string, enum: [ready, unavailable, no-phone-class, error] }
+                  phone_detections: { type: array, items: { type: object } }
+        '401': { description: Missing, invalid, or expired token }
+        '413': { description: Request or decoded image exceeds the configured size limit }
+  /api/v1/dashboard-config:
+    get:
+      summary: Read dashboard configuration
+      responses:
+        '200': { description: Configuration JSON }
+        '401': { description: Missing, invalid, or expired token }
+  /api/v1/telemetry:
+    get:
+      summary: Read recent telemetry
+      responses:
+        '200': { description: Telemetry JSON }
+        '401': { description: Missing, invalid, or expired token }
+  /api/v1/students:
+    get:
+      summary: Read the current student snapshot
+      responses:
+        '200': { description: Student snapshot JSON }
+        '401': { description: Missing, invalid, or expired token }
+  /api/v1/alerts:
+    get:
+      summary: Read current alerts
+      responses:
+        '200': { description: Alerts JSON }
+        '401': { description: Missing, invalid, or expired token }
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: Signed token

@@ -1,0 +1,25 @@
+services:
+  classpulse:
+    build: .
+    image: classpulse:latest
+    restart: unless-stopped
+    environment:
+      APP_ENV: production
+      SECRET_KEY: ${SECRET_KEY:?Set SECRET_KEY in .env}
+      TRUST_PROXY: "1"
+      CLASSPULSE_DB_PATH: /data/classpulse.db
+      CLASSPULSE_PHONE_MODEL: /app/yolo11n.pt
+      FLASK_DEBUG: "0"
+    ports:
+      - "127.0.0.1:5000:5000"
+    volumes:
+      - classpulse-data:/data
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:5000/health', timeout=5)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+volumes:
+  classpulse-data:

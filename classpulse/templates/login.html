@@ -1,0 +1,432 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content="ClassPulse helps teachers monitor classroom attention, fatigue, and engagement with privacy-first analytics." />
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <link rel="apple-touch-icon" href="/static/icons/icon-192.png" />
+    <meta name="theme-color" content="#087f78" />
+    <title>ClassPulse Teacher Portal</title>
+    <style>
+        :root {
+            --bg: #06131d;
+            --bg-deep: #0a1f2a;
+            --panel: rgba(10, 22, 31, 0.9);
+            --panel-alt: rgba(14, 31, 42, 0.86);
+            --primary: #67e8f9;
+            --primary-strong: #22c7e6;
+            --accent: #8b5cf6;
+            --accent-2: #38bdf8;
+            --text: #edfafd;
+            --muted: #9fc2d2;
+            --success: #34d399;
+            --danger: #f87171;
+            --border: rgba(255,255,255,0.09);
+            --shadow: 0 28px 60px rgba(4, 11, 18, 0.65);
+        }
+
+        * { box-sizing: border-box; }
+
+        body {
+            margin: 0;
+            min-height: 100vh;
+            display: grid;
+            place-items: center;
+            background:
+                radial-gradient(circle at top left, rgba(103, 232, 249, 0.2), transparent 24%),
+                radial-gradient(circle at right center, rgba(139, 92, 246, 0.18), transparent 30%),
+                radial-gradient(circle at bottom left, rgba(56, 189, 248, 0.14), transparent 28%),
+                linear-gradient(135deg, var(--bg) 0%, var(--bg-deep) 100%);
+            color: var(--text);
+            font-family: "Segoe UI", Arial, sans-serif;
+            padding: 30px;
+        }
+
+        .auth-shell {
+            width: min(1120px, 100%);
+            display: grid;
+            grid-template-columns: 1.2fr 0.8fr;
+            background: rgba(9, 18, 27, 0.65);
+            border: 1px solid var(--border);
+            border-radius: 28px;
+            overflow: hidden;
+            box-shadow: var(--shadow);
+            backdrop-filter: blur(18px);
+        }
+
+        .hero {
+            position: relative;
+            padding: 42px 38px;
+            background: linear-gradient(160deg, rgba(13, 31, 40, 0.82), rgba(8, 18, 28, 0.7));
+            border-right: 1px solid var(--border);
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            overflow: hidden;
+        }
+
+        .hero::before {
+            content: "";
+            position: absolute;
+            inset: auto -80px -80px auto;
+            width: 220px;
+            height: 220px;
+            border-radius: 50%;
+            background: radial-gradient(circle, rgba(103, 232, 249, 0.28), transparent 60%);
+            filter: blur(10px);
+        }
+
+        .brand {
+            display: flex;
+            align-items: center;
+            gap: 14px;
+            margin-bottom: 26px;
+        }
+
+        .brand-mark {
+            width: 54px;
+            height: 54px;
+            border-radius: 18px;
+            display: grid;
+            place-items: center;
+            font-weight: 800;
+            background: linear-gradient(135deg, var(--primary), var(--accent-2), var(--accent));
+            color: #07252f;
+            box-shadow: 0 12px 34px rgba(34, 199, 230, 0.35);
+            animation: float 4s ease-in-out infinite;
+        }
+
+        @keyframes float {
+            0%, 100% { transform: translateY(0px); }
+            50% { transform: translateY(-4px); }
+        }
+
+        .brand h1 {
+            margin: 0;
+            font-size: clamp(2rem, 3vw, 2.6rem);
+        }
+
+        .brand p {
+            margin: 4px 0 0;
+            color: var(--muted);
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+            font-size: 0.72rem;
+        }
+
+        .hero-copy {
+            max-width: 520px;
+        }
+
+        .eyebrow {
+            display: inline-flex;
+            align-items: center;
+            padding: 7px 12px;
+            border-radius: 999px;
+            background: rgba(103, 232, 249, 0.1);
+            border: 1px solid rgba(103, 232, 249, 0.22);
+            color: var(--primary);
+            font-size: 0.72rem;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+            margin-bottom: 18px;
+        }
+
+        .hero-copy h2 {
+            margin: 0 0 12px;
+            font-size: clamp(2.1rem, 4vw, 3.3rem);
+            line-height: 1.1;
+        }
+
+        .hero-copy p {
+            margin: 0;
+            color: var(--muted);
+            font-size: 1.06rem;
+            line-height: 1.7;
+        }
+
+        .feature-grid {
+            display: grid;
+            grid-template-columns: repeat(3, minmax(120px, 1fr));
+            gap: 14px;
+            margin-top: 28px;
+        }
+
+        .feature {
+            border: 1px solid var(--border);
+            background: linear-gradient(180deg, rgba(255,255,255,0.03), rgba(255,255,255,0.01));
+            border-radius: 16px;
+            padding: 16px 14px;
+            box-shadow: inset 0 1px 0 rgba(255,255,255,0.04);
+        }
+
+        .feature strong {
+            display: block;
+            margin-bottom: 8px;
+            font-size: 1.15rem;
+            color: var(--text);
+        }
+
+        .feature span {
+            color: var(--muted);
+            font-size: 0.8rem;
+            line-height: 1.5;
+        }
+
+        .panel {
+            padding: 36px 28px;
+            background: rgba(11, 23, 31, 0.92);
+        }
+
+        .auth-stack {
+            display: grid;
+            gap: 20px;
+        }
+
+        .auth-form {
+            display: grid;
+            gap: 16px;
+            padding: 20px 18px;
+            border: 1px solid var(--border);
+            border-radius: 18px;
+            background: linear-gradient(180deg, rgba(255,255,255,0.025), rgba(255,255,255,0.015));
+            box-shadow: inset 0 1px 0 rgba(255,255,255,0.04);
+        }
+
+        .auth-form h2 {
+            margin: 0;
+            font-size: 1.2rem;
+        }
+
+        label {
+            display: grid;
+            gap: 8px;
+            color: var(--muted);
+            font-size: 0.9rem;
+        }
+
+        input {
+            width: 100%;
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            background: rgba(15, 29, 39, 0.9);
+            color: var(--text);
+            padding: 12px 14px;
+            font-size: 1rem;
+        }
+
+        input:focus {
+            outline: 2px solid rgba(103, 232, 249, 0.38);
+            border-color: rgba(103, 232, 249, 0.6);
+        }
+
+        button {
+            width: 100%;
+            border: none;
+            border-radius: 12px;
+            background: linear-gradient(135deg, var(--primary), var(--primary-strong));
+            color: #07252f;
+            font-weight: 800;
+            padding: 12px 16px;
+            cursor: pointer;
+            transition: transform 0.15s ease, box-shadow 0.15s ease;
+            box-shadow: 0 12px 22px rgba(34, 199, 230, 0.3);
+        }
+
+        button:hover {
+            transform: translateY(-1px);
+        }
+
+        .error {
+            margin: 0 0 14px;
+            color: #ffd7d7;
+            background: rgba(248, 113, 113, 0.08);
+            border: 1px solid rgba(248, 113, 113, 0.22);
+            padding: 10px 12px;
+            border-radius: 10px;
+            font-size: 0.92rem;
+        }
+
+        .hint {
+            margin-top: 16px;
+            color: var(--muted);
+            font-size: 0.85rem;
+            text-align: center;
+            line-height: 1.6;
+        }
+
+        .demo-card {
+            margin-top: 12px;
+            padding: 12px 14px;
+            border-radius: 12px;
+            border: 1px solid var(--border);
+            background: rgba(139, 92, 246, 0.05);
+            color: var(--muted);
+            font-size: 0.9rem;
+            line-height: 1.6;
+        }
+
+        @media (max-width: 900px) {
+            .auth-shell {
+                grid-template-columns: 1fr;
+            }
+
+            .hero {
+                border-right: none;
+                border-bottom: 1px solid var(--border);
+            }
+        }
+
+        body { background: #f4efe5; color: #41382f; }
+        .auth-shell {
+            background: #fff;
+            border: 1px solid #e5dac9;
+            border-radius: 20px;
+            box-shadow: 0 24px 60px rgba(68, 55, 39, .12);
+        }
+        .hero {
+            --text: #f0fbfa;
+            --muted: #acc2c3;
+            --border: rgba(255,255,255,.13);
+            --primary: #5bd0bd;
+            --primary-strong: #28ad9b;
+            color: var(--text);
+            background: linear-gradient(145deg, #17383e, #132c33);
+        }
+        .brand-mark { border-radius: 13px; color: #fff; }
+        .panel {
+            --text: #41382f;
+            --muted: #817568;
+            --border: #e5dac9;
+            padding: 30px 26px;
+            background: #fff;
+        }
+        .auth-form {
+            background: #f8fafa;
+            box-shadow: none;
+        }
+        .auth-form h2 { color: #41382f; }
+        input { background: #fffaf2; color: #41382f; }
+        input:focus { outline-color: rgba(113,130,84,.2); border-color: #a9b38d; }
+        button {
+            background: #718254;
+            color: #fff;
+            box-shadow: 0 8px 18px rgba(89,103,64,.18);
+        }
+        .demo-card { background: #f7f1e7; }
+        .error { color: #9c3939; background: #fff1ef; border-color: #f1d5d0; }
+        .login-theme-toggle {
+            position: fixed; z-index: 5; top: 18px; right: 18px; width: auto;
+            padding: 10px 14px; border: 1px solid #e0d6c7; border-radius: 999px;
+            color: #5d594a; background: #fffaf2; box-shadow: 0 4px 12px rgba(68,55,39,.08);
+        }
+        .login-theme-toggle:hover { background: #f8f3e9; }
+        :root[data-theme="dark"] body { background: #171a16; color: #eee9dd; }
+        :root[data-theme="dark"] .auth-shell { background: #242820; border-color: #3c4338; box-shadow: 0 24px 60px rgba(0,0,0,.3); }
+        :root[data-theme="dark"] .panel { --text: #eee9dd; --muted: #b4ad9e; --border: #41473b; background: #242820; }
+        :root[data-theme="dark"] .auth-form { background: #2b3027; }
+        :root[data-theme="dark"] .auth-form h2 { color: #eee9dd; }
+        :root[data-theme="dark"] label, :root[data-theme="dark"] .hint { color: #b4ad9e; }
+        :root[data-theme="dark"] input { color: #eee9dd; background: #20241e; border-color: #41473b; }
+        :root[data-theme="dark"] .demo-card { color: #c9c1b1; background: #2d3327; }
+        :root[data-theme="dark"] .login-theme-toggle { color: #e1dac9; background: #2b3027; border-color: #444a3e; }
+    </style>
+</head>
+<body>
+    <button id="theme-toggle" class="theme-toggle login-theme-toggle" type="button" aria-pressed="false">
+        <span class="theme-icon" aria-hidden="true">☾</span><span class="theme-label">Night mode</span>
+    </button>
+    <div class="auth-shell">
+        <section class="hero">
+            <div>
+                <div class="brand">
+                    <div class="brand-mark">CP</div>
+                    <div>
+                        <h1>ClassPulse</h1>
+                        <p>Teacher portal</p>
+                    </div>
+                </div>
+
+                <div class="hero-copy">
+                    <div class="eyebrow">Classroom intelligence</div>
+                    <h2>See attention before it slips.</h2>
+                    <p>
+                        Monitor engagement, fatigue, and posture in real time so instructors can respond early and keep every class focused.
+                    </p>
+                </div>
+
+                <div class="feature-grid">
+                    <div class="feature">
+                        <strong>Live</strong>
+                        <span>On-demand classroom scan</span>
+                    </div>
+                    <div class="feature">
+                        <strong>Live</strong>
+                        <span>Camera frames analyzed on request</span>
+                    </div>
+                    <div class="feature">
+                        <strong>Private</strong>
+                        <span>Images are retained only when a teacher opts in</span>
+                    </div>
+                </div>
+            </div>
+
+            <div class="demo-card">
+            Teacher accounts are stored in the configured database. Camera frames are analyzed in memory; a frame is retained only when a signed-in teacher explicitly enables scan saving and supplies a student identity.
+            </div>
+        </section>
+
+        <aside class="panel">
+            {% if error %}
+                <div class="error">{{ error }}</div>
+            {% endif %}
+
+            <div class="auth-stack">
+                <form method="POST" action="/api/auth/login" class="auth-form">
+                    <h2>Login</h2>
+                    <label>
+                        Email address
+                        <input type="email" name="email" placeholder="teacher@classpulse.com" autocomplete="email" required />
+                    </label>
+
+                    <label>
+                        Password
+                        <input type="password" name="password" placeholder="Enter your password" autocomplete="current-password" required />
+                    </label>
+
+                    <button type="submit">Login as teacher</button>
+                </form>
+
+                <form method="POST" action="/api/auth/register" class="auth-form">
+                    <h2>Create account</h2>
+                    <label>
+                        Teacher name
+                        <input type="text" name="name" placeholder="Enter full name" autocomplete="name" required />
+                    </label>
+
+                    <label>
+                        Email address
+                        <input type="email" name="email" placeholder="you@school.edu" autocomplete="email" required />
+                    </label>
+
+                    <label>
+                        Department
+                        <input type="text" name="department" placeholder="Department or grade" autocomplete="organization" />
+                    </label>
+
+                    <label>
+                        Password
+                        <input type="password" name="password" placeholder="Create a password" autocomplete="new-password" required />
+                    </label>
+
+                    <button type="submit">Register as teacher</button>
+                </form>
+            </div>
+
+            {% if show_demo_credentials %}<div class="hint">Local demo account: teacher@classpulse.com / Teacher@123</div>{% endif %}
+        </aside>
+    </div>
+    <script src="/static/theme.js"></script>
+</body>
+</html>

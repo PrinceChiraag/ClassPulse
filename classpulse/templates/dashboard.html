@@ -1,0 +1,383 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>ClassPulse Portal</title>
+    <link rel="stylesheet" href="/static/dashboard.css" />
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <meta name="theme-color" content="#087f78" />
+</head>
+<body>
+    <div class="portal-shell">
+        <aside class="sidebar">
+            <div class="brand-block">
+                <div class="brand-mark">CP</div>
+                <div>
+                    <p class="brand-title">ClassPulse</p>
+                    <span class="brand-subtitle">Education Portal</span>
+                </div>
+            </div>
+
+            <nav class="nav-menu">
+                <a class="nav-item active" href="/overview">Overview</a>
+                <a class="nav-item" href="/classroom">Classroom</a>
+                <a class="nav-item" href="/camera">Camera</a>
+                <a class="nav-item" href="/camera-settings">Camera settings</a>
+                <a class="nav-item" href="/settings">Settings</a>
+            </nav>
+
+            <button id="theme-toggle" class="theme-toggle" type="button" aria-pressed="false">
+                <span class="theme-icon" aria-hidden="true">☾</span><span class="theme-label">Night mode</span>
+            </button>
+
+            <div class="sidebar-card">
+                <p class="mini-label">Privacy mode</p>
+                <strong>Privacy first</strong>
+                <span>Saving is opt-in</span>
+            </div>
+        </aside>
+
+        <main class="main-panel">
+            <header class="topbar">
+                <div>
+                    <p class="eyebrow">Teacher portal</p>
+                    <h1>Classroom overview</h1>
+                    <p class="portal-subtitle">On-demand classroom cues for teacher review</p>
+                    {% if teacher %}
+                        <div class="teacher-badge">
+                            <span>Teacher:</span>
+                            <strong>{{ teacher.name }}</strong>
+                            {% if teacher.department %}
+                                <small>• {{ teacher.department }}</small>
+                            {% endif %}
+                        </div>
+                    {% endif %}
+                </div>
+                <div class="header-actions">
+                    <button id="sync-dashboard" class="secondary-button">Sync feed</button>
+                    <button id="logout-button" class="secondary-button">Logout</button>
+                </div>
+            </header>
+
+            <section class="panel overview-hero">
+                <div class="hero-copy">
+                    <p class="eyebrow accent">AI classroom intelligence</p>
+                    <h2>Classroom insights, at a glance</h2>
+                    <p class="portal-subtitle">Capture a photo to review heuristic focus, fatigue, and phone cues. Results can be uncertain and should not be used to judge individual students.</p>
+                    <div class="quick-chips" aria-label="Live analysis tools">
+                        <span class="chip chip-primary">Photo scan</span>
+                        <span class="chip">Face tracking</span>
+                        <span class="chip">Fatigue analysis</span>
+                        <span class="chip">Posture review</span>
+                    </div>
+                </div>
+                <div class="hero-stats">
+                    <div class="hero-stat">
+                        <span>Room health</span>
+                        <strong id="hero-health">Monitoring</strong>
+                    </div>
+                    <div class="hero-stat">
+                        <span>Focus trend</span>
+                        <strong id="hero-focus">Stable</strong>
+                    </div>
+                    <div class="hero-stat">
+                        <span>Latest snapshot</span>
+                        <strong id="hero-snapshot">Ready</strong>
+                    </div>
+                </div>
+            </section>
+
+            <section class="panel camera-guide">
+                <div class="guide-copy">
+                    <span class="guide-pill">On-demand photo analysis</span>
+                    <h2>Ready when you are</h2>
+                </div>
+                <div class="guide-tip">
+                    <strong>Camera access:</strong>
+                    <span>Phone objects are highlighted during each scan. A visible phone does not prove use; check the scene before acting on a warning.</span>
+                </div>
+            </section>
+
+            <section id="camera-access-banner" class="camera-access-banner" aria-live="polite">
+                <div class="camera-access-icon">📷</div>
+                <div>
+                    <strong>Allow camera access</strong>
+                    <p>Start the camera, then capture a photo to begin analysis.</p>
+                </div>
+            </section>
+
+            <section class="panel control-strip">
+                <div class="control-group" id="option-controls">
+                    <label class="option-toggle">
+                        <input type="checkbox" data-option="camera_feed" checked />
+                        <span>Camera feed</span>
+                    </label>
+                    <label class="option-toggle">
+                        <input type="checkbox" data-option="student_tracking" checked />
+                        <span>Student tracking</span>
+                    </label>
+                    <label class="option-toggle">
+                        <input type="checkbox" data-option="fatigue_detection" checked />
+                        <span>Fatigue detection</span>
+                    </label>
+                    <label class="option-toggle">
+                        <input type="checkbox" data-option="posture_analysis" checked />
+                        <span>Posture analysis</span>
+                    </label>
+                    <label class="option-toggle">
+                        <input type="checkbox" data-option="privacy_mode" checked />
+                        <span>Privacy blur</span>
+                    </label>
+                    <label class="option-toggle">
+                        <input type="checkbox" data-option="face_blur" checked />
+                        <span>Face blur</span>
+                    </label>
+                    <label class="option-toggle">
+                        <input type="checkbox" data-option="auto_refresh" checked />
+                        <span>Auto refresh</span>
+                    </label>
+                    <label class="option-toggle">
+                        <input type="checkbox" data-option="phone_detection" checked />
+                        <span>Phone scan</span>
+                    </label>
+                    <label class="option-toggle">
+                        <input type="checkbox" data-option="show_phone_boxes" checked />
+                        <span>Phone boxes</span>
+                    </label>
+                    <label class="option-toggle">
+                        <input type="checkbox" data-option="sound_alerts" />
+                        <span>Sound alerts</span>
+                    </label>
+                </div>
+
+                <label class="select-field" for="focus-mode">
+                    <span>Focus mode</span>
+                    <select id="focus-mode">
+                        <option value="lecture">Lecture</option>
+                        <option value="exam">Exam</option>
+                        <option value="group">Group review</option>
+                        <option value="lab">Hands-on lab</option>
+                    </select>
+                </label>
+
+                <label class="select-field" for="analysis-mode">
+                    <span>Analysis mode</span>
+                    <select id="analysis-mode">
+                        <option>Lecture mode</option>
+                        <option>Exam mode</option>
+                        <option>Group review</option>
+                        <option>Hands-on lab</option>
+                    </select>
+                </label>
+
+                <label class="select-field" for="camera-source">
+                    <span>Camera source</span>
+                    <select id="camera-source">
+                        <option value="default">Default camera</option>
+                    </select>
+                </label>
+
+                <label class="slider-field" for="alert-threshold">
+                    <span>Alert threshold</span>
+                    <div class="slider-row">
+                        <input id="alert-threshold" type="range" min="0.3" max="0.95" step="0.05" value="0.7" />
+                        <strong id="alert-threshold-label">0.70</strong>
+                    </div>
+                </label>
+                <label class="slider-field" for="phone-confidence">
+                    <span>Phone confidence</span>
+                    <div class="slider-row">
+                        <input id="phone-confidence" type="range" min="0.2" max="0.8" step="0.05" value="0.32" />
+                        <strong id="phone-confidence-label">0.32</strong>
+                    </div>
+                </label>
+            </section>
+
+            <section class="panel detail-panel">
+                <div class="panel-header">
+                    <h2>Portal details</h2>
+                </div>
+                <div class="detail-grid">
+                    <div class="detail-card">
+                        <span>Focus stability</span>
+                        <strong id="focus-stability">--</strong>
+                    </div>
+                    <div class="detail-card">
+                        <span>Face coverage</span>
+                        <strong id="face-coverage">--</strong>
+                    </div>
+                    <div class="detail-card">
+                        <span>Last capture</span>
+                        <strong id="last-capture">--</strong>
+                    </div>
+                    <div class="detail-card">
+                        <span>Camera status</span>
+                        <strong id="camera-readiness">--</strong>
+                    </div>
+                    <div class="detail-card">
+                        <span>Student count</span>
+                        <strong id="student-count">--</strong>
+                    </div>
+                </div>
+                <div class="action-box">
+                    <h3>Next step</h3>
+                    <p id="recommended-action">The portal will suggest the next classroom action after the first live scan.</p>
+                </div>
+            </section>
+
+            <section class="summary-grid">
+                <article class="card highlight">
+                    <p class="card-label">Average attention cue</p>
+                    <div class="metric" id="avg-attention">--</div>
+                    <span class="trend positive" id="attention-trend">Monitoring</span>
+                    <div class="sparkline-wrap">
+                        <svg id="score-sparkline" class="score-sparkline" viewBox="0 0 120 40" preserveAspectRatio="none"></svg>
+                    </div>
+                </article>
+
+                <article class="card">
+                    <p class="card-label">Fatigue alerts</p>
+                    <div class="metric" id="fatigue-alerts">--</div>
+                    <span class="trend neutral" id="fatigue-trend">System status</span>
+                </article>
+
+                <article class="card">
+                    <p class="card-label">Scans this session</p>
+                    <div class="metric" id="active-students">--</div>
+                    <span class="trend neutral">Sessions tracked</span>
+                </article>
+
+                <article class="card status-card">
+                    <p class="card-label">Room status</p>
+                    <div class="metric status" id="room-status">--</div>
+                    <span class="trend neutral" id="status-detail">Awaiting data</span>
+                </article>
+            </section>
+
+            <section class="content-grid">
+                <div class="panel camera-panel">
+                    <div class="panel-header">
+                        <h2>Live classroom camera</h2>
+                        <span id="camera-status" class="status-pill idle">Camera off</span>
+                    </div>
+                    <div class="camera-frame">
+                        <video id="camera-feed" autoplay playsinline muted></video>
+                        <canvas id="phone-overlay" class="phone-overlay" aria-hidden="true"></canvas>
+                        <div class="camera-overlay">
+                            <span id="camera-context">Session feed</span>
+                        </div>
+                        <div id="phone-detection-status" class="phone-detection-status" aria-live="polite">Phone detector loading</div>
+                    </div>
+                    <div class="camera-actions">
+                        <button id="camera-toggle" class="secondary-button" type="button">Start camera</button>
+                        <button id="capture-photo" class="primary-button" type="button">Capture &amp; analyze photo</button>
+                        <button id="privacy-wireframe-toggle" class="secondary-button" type="button">Show scan guide</button>
+                    </div>
+                    <div class="photo-panel" id="photo-panel" style="display:none; margin-top:16px;">
+                        <div class="photo-head">
+                            <h3>Captured student photo</h3>
+                            <button id="clear-photo" class="ghost-button" type="button">Clear</button>
+                        </div>
+                        <img id="captured-photo" alt="Captured classroom photo" />
+                    </div>
+                </div>
+
+                <div class="panel analytics-panel">
+                    <div class="panel-header">
+                        <h2>Photo analysis results</h2>
+                    </div>
+
+                    <div class="mini-stat-row">
+                        <span>Eye engagement</span>
+                        <strong id="eye-engagement">--</strong>
+                    </div>
+                    <div class="mini-stat-row">
+                        <span>Posture score</span>
+                        <strong id="posture-score">--</strong>
+                    </div>
+                    <div class="mini-stat-row">
+                        <span>Last refresh</span>
+                        <strong id="last-refresh">--</strong>
+                    </div>
+
+                    <div class="notes-box face-details-box">
+                        <h3>Detected face summary</h3>
+                        <div id="face-phone-warning" class="face-phone-warning" role="alert" aria-live="assertive" hidden>PHONE IS DETECTED</div>
+                        <div class="face-detail-row">
+                            <span>Status</span>
+                            <strong id="face-detail-status">Awaiting scan</strong>
+                        </div>
+                        <div class="face-detail-row">
+                            <span>Risk level</span>
+                            <strong id="face-detail-risk">--</strong>
+                        </div>
+                        <div class="face-detail-row">
+                            <span>Attention</span>
+                            <strong id="face-detail-attention">--</strong>
+                        </div>
+                        <div class="face-detail-row">
+                            <span>Eye engagement</span>
+                            <strong id="face-detail-eye">--</strong>
+                        </div>
+                        <div class="face-detail-row">
+                            <span>Posture</span>
+                            <strong id="face-detail-posture">--</strong>
+                        </div>
+                        <div class="face-detail-row">
+                            <span>Fatigue risk</span>
+                            <strong id="face-detail-fatigue">--</strong>
+                        </div>
+                        <div class="face-detail-row">
+                            <span>Confidence</span>
+                            <strong id="face-detail-confidence">--</strong>
+                        </div>
+                        <div class="score-summary-card">
+                            <div class="overall-score-row">
+                                <span>Overall score</span>
+                                <strong id="overall-score-badge">--</strong>
+                            </div>
+                            <div class="status-badges-row">
+                                <span id="drowsiness-status-badge" class="status-badge alert">Alert</span>
+                            </div>
+                            <div id="score-badges" class="score-badges">
+                                <span class="score-badge neutral">Attention: --</span>
+                                <span class="score-badge neutral">Eyes: --</span>
+                                <span class="score-badge neutral">Posture: --</span>
+                            </div>
+                        </div>
+                        <div class="confidence-meter" aria-label="Face confidence meter">
+                            <span id="confidence-bar" style="width: 0%"></span>
+                        </div>
+                        <p id="face-detail-recommendation">The portal will show detailed guidance for the active face after a scan.</p>
+                    </div>
+                </div>
+            </section>
+
+            <section class="bottom-grid">
+                <div class="panel roster-panel">
+                    <div class="panel-header">
+                        <h2>Student roster</h2>
+                    </div>
+                    <div id="student-roster" class="student-roster"></div>
+                </div>
+
+                <div class="panel alert-panel">
+                    <div class="panel-header">
+                        <h2>Attention heatmap</h2>
+                    </div>
+                    <div id="heatmap" class="heatmap"></div>
+                    <div class="panel-header sub-header">
+                        <h2>Active alerts</h2>
+                    </div>
+                    <ul id="alert-list" class="alert-list"></ul>
+                </div>
+            </section>
+
+        </main>
+    </div>
+
+    <script src="/static/theme.js"></script>
+    <script src="/static/dashboard.js"></script>
+</body>
+</html>
