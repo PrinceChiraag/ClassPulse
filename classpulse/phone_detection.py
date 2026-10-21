@@ -5,30 +5,49 @@ fine-tuned weights file to use a custom classroom model.
 """
 
 import os
+import logging
 import threading
+import time
 
 import cv2
 
 
 _model = None
 _model_error = None
+_retry_after = 0.0
+_model_status = None
 _model_lock = threading.Lock()
+logger = logging.getLogger(__name__)
 
 
 def _get_model():
-    global _model, _model_error
-    if _model is not None or _model_error is not None:
+    global _model, _model_error, _model_status, _retry_after
+    if _model is not None:
         return _model
+    if _model_error is not None and time.monotonic() < _retry_after:
+        return None
     with _model_lock:
-        if _model is not None or _model_error is not None:
+        if _model is not None:
             return _model
+        if _model_error is not None and time.monotonic() < _retry_after:
+            return None
         try:
             from ultralytics import YOLO
 
             weights = os.getenv("CLASSPULSE_PHONE_MODEL", "yolo11n.pt")
             _model = YOLO(weights)
+            _model_error = None
+            _model_status = None
         except Exception as exc:  # optional dependency / model download failure
-            _model_error = str(exc)
+            _model_error = f"{type(exc).__name__}: {exc}"
+            if isinstance(exc, ModuleNotFoundError) and exc.name == "ultralytics":
+                _model_status = "not-installed"
+            elif isinstance(exc, FileNotFoundError):
+                _model_status = "model-not-found"
+            else:
+                _model_status = "load-error"
+            _retry_after = time.monotonic() + 60.0
+            logger.exception("Phone detector model failed to load from %s", os.getenv("CLASSPULSE_PHONE_MODEL", "yolo11n.pt"))
     return _model
 
 
@@ -40,20 +59,36 @@ def _phone_class_ids(model):
     return [int(class_id) for class_id, name in names.items() if any(term in str(name).lower() for term in accepted)]
 
 
+def phone_detector_runtime_status():
+    """Load the configured detector and describe whether it can run here."""
+    model = _get_model()
+    if model is None:
+        return _model_status or "unavailable"
+    if _phone_class_ids(model):
+        return "ready"
+    names = model.names if isinstance(model.names, dict) else dict(enumerate(model.names))
+    return "ready" if str(names.get(67, "")).lower() == "cell phone" else "no-phone-class"
+
+
 def detect_phones(frame, confidence=0.32):
     """Return room-level phone boxes. Images are evaluated in memory only."""
     model = _get_model()
     if model is None:
-        # Shape-based contour matching produced many false positives for books,
-        # screens, and classroom furniture. Report unavailable instead of
-        # presenting guesses as phone detections.
-        return [], "unavailable"
-
-    class_ids = _phone_class_ids(model)
-    if not class_ids:
-        return [], "no-phone-class"
+        detections = _fallback_phone_scan(frame)
+        return detections, "fallback" if detections else (_model_status or "unavailable")
 
     try:
+        class_ids = _phone_class_ids(model)
+        if not class_ids:
+            # COCO calls this class "cell phone" but not every compatible
+            # weights file has that label. Use its canonical COCO class id only
+            # when that label set is present; do not fail the entire scan.
+            names = model.names if isinstance(model.names, dict) else dict(enumerate(model.names))
+            if str(names.get(67, "")).lower() == "cell phone":
+                class_ids = [67]
+            else:
+                detections = _fallback_phone_scan(frame)
+                return detections, "fallback" if detections else "no-phone-class"
         # Ultralytics models are shared by threaded Flask requests; serialize inference.
         with _model_lock:
             result = model.predict(frame, classes=class_ids, conf=float(confidence), imgsz=640, verbose=False)[0]
@@ -67,8 +102,10 @@ def detect_phones(frame, confidence=0.32):
                     "bbox": {"x": x1, "y": y1, "width": max(1, x2 - x1), "height": max(1, y2 - y1)},
                 })
         return detections, "ready"
-    except Exception:
-        return [], "error"
+    except Exception as exc:
+        logger.exception("Phone detection inference failed")
+        detections = _fallback_phone_scan(frame)
+        return detections, "fallback" if detections else "error"
 
 
 def _fallback_phone_scan(frame):

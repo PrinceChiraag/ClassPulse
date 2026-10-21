@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>ClassPulse Overview</title>
-    <link rel="stylesheet" href="/static/dashboard.css" />
+    <link rel="stylesheet" href="/static/dashboard.css?v=20261022" />
     <link rel="manifest" href="/manifest.webmanifest" />
     <link rel="apple-touch-icon" href="/static/icons/icon-192.png" />
     <meta name="theme-color" content="#087f78" />
@@ -151,6 +151,11 @@
                         <div id="phone-detection-status" class="phone-detection-status" aria-live="polite">Phone detector loading</div>
                     </div>
                     <div id="phone-scan-alert" class="phone-scan-alert" role="alert" aria-live="assertive" hidden></div>
+                    <div class="camera-facing-controls" role="group" aria-label="Choose camera">
+                        <span>Camera</span>
+                        <button type="button" class="camera-facing-button" data-facing-camera="front" aria-pressed="false">Front</button>
+                        <button type="button" class="camera-facing-button" data-facing-camera="rear" aria-pressed="false">Back</button>
+                    </div>
                     <div class="camera-actions">
                         <button id="camera-toggle" class="secondary-button" type="button">Start camera</button>
                         <button id="capture-photo" class="primary-button" type="button">Capture &amp; analyze photo</button>
@@ -247,6 +252,6 @@
     </div>
 
     <script src="/static/theme.js"></script>
-    <script src="/static/dashboard.js"></script>
+    <script src="/static/dashboard.js?v=20261022"></script>
 </body>
 </html>

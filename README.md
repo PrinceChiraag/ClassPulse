@@ -24,6 +24,8 @@ pip install -r requirements.txt
 python app.py
 ```
 
+Run the server with the same `.venv` interpreter used for installation. On Windows, `.\run-classpulse.ps1` starts it with `.venv\Scripts\python.exe`. In VS Code, select that interpreter before launching `app.py`; using a different system Python can leave Ultralytics unavailable even though it is listed in `requirements.txt`. The `/health` response includes the phone detector's runtime status. The bundled `yolo11n.pt` model is loaded from the project directory by default.
+
 Open `http://localhost:5000/login`. The local demo account is `teacher@classpulse.com` / `Teacher@123`; replace it before any shared or public deployment. HTTPS is unnecessary for the localhost camera workflow. Browsers require HTTPS for camera access on non-localhost hosts.
 
 ## Deploy with Docker Compose

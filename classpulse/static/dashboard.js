@@ -54,6 +54,7 @@ const capturedPhoto = document.getElementById("captured-photo");
 const cameraStatus = document.getElementById("camera-status");
 const analysisModeSelect = document.getElementById("analysis-mode");
 const cameraSourceSelect = document.getElementById("camera-source");
+const cameraFacingButtons = document.querySelectorAll("[data-facing-camera]");
 const detectionModeSelect = document.getElementById("detection-mode");
 const earBlinkCutoffInput = document.getElementById("ear-blink-cutoff");
 const marYawnSensitivityInput = document.getElementById("mar-yawn-sensitivity");
@@ -211,6 +212,7 @@ function renderControls() {
             cameraSourceSelect.appendChild(option);
         });
     }
+    updateCameraFacingButtons();
 
     if (detectionModeSelect) {
         const modeValue = dashboardConfig.controls.detection_mode || "multi-face";
@@ -290,31 +292,40 @@ function renderPhoneDetections(result) {
             : "";
     }
     if (phoneOverlay && cameraFeed) {
-        const width = cameraFeed.videoWidth || 640;
-        const height = cameraFeed.videoHeight || 480;
+        const frameWidth = Number(result.frame_width || cameraFeed.videoWidth || 640);
+        const frameHeight = Number(result.frame_height || cameraFeed.videoHeight || 480);
+        const rect = cameraFeed.getBoundingClientRect();
+        const dpr = window.devicePixelRatio || 1;
+        const width = Math.max(1, Math.round(rect.width * dpr));
+        const height = Math.max(1, Math.round(rect.height * dpr));
         if (phoneOverlay.width !== width || phoneOverlay.height !== height) {
             phoneOverlay.width = width;
             phoneOverlay.height = height;
         }
         const ctx = phoneOverlay.getContext("2d");
         ctx.clearRect(0, 0, width, height);
+        const scale = Math.max(width / frameWidth, height / frameHeight);
+        const offsetX = (width - frameWidth * scale) / 2;
+        const offsetY = (height - frameHeight * scale) / 2;
         if (dashboardConfig.controls.show_phone_boxes !== false) detections.forEach((item) => {
             const box = item.bbox || {};
-            const y = Number(box.y || 0);
-            const w = Number(box.width || 0), h = Number(box.height || 0);
-            const x = width - Number(box.x || 0) - w;
-            ctx.lineWidth = Math.max(2, width / 500);
+            const y = offsetY + Number(box.y || 0) * scale;
+            const w = Number(box.width || 0) * scale, h = Number(box.height || 0) * scale;
+            const rawX = Number(box.x || 0);
+            const sourceX = cameraFeed.classList.contains("camera-mirrored") ? frameWidth - rawX - Number(box.width || 0) : rawX;
+            const x = offsetX + sourceX * scale;
+            ctx.lineWidth = Math.max(2 * dpr, width / 500);
             ctx.strokeStyle = "#ffb44a";
             ctx.fillStyle = "rgba(255, 180, 74, .16)";
             ctx.strokeRect(x, y, w, h);
             ctx.fillRect(x, y, w, h);
-            ctx.font = `${Math.max(14, width / 55)}px Segoe UI, sans-serif`;
+            ctx.font = `${Math.max(14 * dpr, width / 55)}px Segoe UI, sans-serif`;
             ctx.fillStyle = "#241b0e";
             const label = `PHONE OBJECT ${Math.round(Number(item.confidence || 0) * 100)}%`;
             const labelWidth = ctx.measureText(label).width + 12;
-            ctx.fillRect(x, Math.max(0, y - 28), labelWidth, 26);
+            ctx.fillRect(x, Math.max(0, y - 28 * dpr), labelWidth, 26 * dpr);
             ctx.fillStyle = "#241b0e";
-            ctx.fillText(label, x + 6, Math.max(19, y - 9));
+            ctx.fillText(label, x + 6 * dpr, Math.max(19 * dpr, y - 9 * dpr));
         });
     }
     if (phoneDetectionStatus) {
@@ -333,7 +344,15 @@ function renderPhoneDetections(result) {
                 ? "Phone scan is turned off"
                 : state === "no-phone-class"
                     ? "Phone detection unavailable: model has no phone class"
-                    : "Phone detection unavailable: install detector and model weights";
+                    : state === "not-installed"
+                        ? "Phone detector not installed in the server Python environment; install requirements.txt and restart"
+                        : state === "model-not-found"
+                            ? "Phone detector weights are missing; set CLASSPULSE_PHONE_MODEL to yolo11n.pt"
+                    : state === "error"
+                        ? "Phone detector failed on the server; check deployment logs"
+                        : state === "load-error"
+                            ? "Phone detector could not load; check server logs and model compatibility"
+                            : "Phone detection unavailable on the server; verify detector and model weights";
         }
     }
     if (alertList) {
@@ -709,7 +728,9 @@ function renderFaceDetails(payload) {
     const faceEntries = Array.isArray(detail.faces) ? detail.faces : (detail.face_detected ? [detail] : []);
     const primaryFace = faceEntries[0] || {};
     const hasFace = faceEntries.length > 0;
-    const statusText = detail.status || (hasFace ? (faceEntries.length > 1 ? `Multi-face scan: ${faceEntries.length} students` : "Face analyzed") : "No clear face detected");
+    const statusText = detail.analysis_mode === "basic-fallback" && hasFace
+        ? "Basic estimate · detailed face analysis unavailable"
+        : detail.status || (hasFace ? (faceEntries.length > 1 ? `Multi-face scan: ${faceEntries.length} students` : "Face analyzed") : "No clear face detected");
     const confidenceValue = Number(primaryFace.confidence ?? detail.confidence ?? 0);
     const confidencePercent = Math.max(0, Math.min(100, confidenceValue));
     const eyeScore = Number(primaryFace.eye_engagement ?? detail.eye_engagement ?? 0) * 100;
@@ -793,7 +814,7 @@ function renderFaceDetails(payload) {
         summarySelectors.face_posture.textContent = `${postureScore.toFixed(1)}/100`;
     }
     if (summarySelectors.face_fatigue) {
-        summarySelectors.face_fatigue.textContent = `${fatigueScore.toFixed(1)}%`;
+        summarySelectors.face_fatigue.textContent = hasFace ? `${fatigueScore.toFixed(1)}%` : "Awaiting face";
     }
     if (summarySelectors.face_confidence) {
         summarySelectors.face_confidence.textContent = `${overallScore.toFixed(1)}/100`;
@@ -828,7 +849,9 @@ function renderFaceDetails(payload) {
     if (summarySelectors.face_recommendation) {
         summarySelectors.face_recommendation.textContent =
             detail.recommendation ||
-            "Adjust lighting and keep each face fully in frame so the analysis can read the eyes, posture, and fatigue risk.";
+            (detail.analysis_mode === "basic-fallback"
+                ? "Basic fatigue estimate is active. For detailed eye and fatigue cues, the server needs MediaPipe face and pose analysis available."
+                : "Adjust lighting and keep each face fully in frame so the analysis can read the eyes, posture, and fatigue risk.");
     }
 }
 
@@ -886,6 +909,7 @@ async function toggleCamera() {
         localStream.getTracks().forEach((track) => track.stop());
         localStream = null;
         cameraFeed.srcObject = null;
+        cameraFeed.classList.remove("camera-mirrored");
         if (cameraStatus) {
             cameraStatus.textContent = "Camera off";
             cameraStatus.className = "status-pill idle";
@@ -920,6 +944,11 @@ async function toggleCamera() {
 
         clearCameraUnavailable();
         cameraFeed.srcObject = localStream;
+        const actualFacing = localStream.getVideoTracks()[0]?.getSettings?.().facingMode;
+        const requestedFacing = dashboardConfig.controls.camera_source || "default";
+        const mirrorPreview = actualFacing ? actualFacing === "user" : requestedFacing === "front" ||
+            (requestedFacing === "default" && !/Android|iPhone|iPad|iPod/i.test(navigator.userAgent));
+        cameraFeed.classList.toggle("camera-mirrored", mirrorPreview);
         await cameraFeed.play().catch(() => undefined);
 
         if (cameraStatus) {
@@ -988,8 +1017,12 @@ async function analyzeImageData(imageData, label = "camera") {
             }),
         });
 
-        const result = await response.json();
-        if (!response.ok) throw new Error(result.error || "Face scan failed");
+        const result = await response.json().catch(() => ({}));
+        if (!response.ok) {
+            const scanError = new Error(result.error || `Face scan failed (HTTP ${response.status})`);
+            scanError.scanFailure = true;
+            throw scanError;
+        }
         const attention = Number(result.attention || 0);
         const fatigue = Number(result.fatigue || 0);
         renderFaceDetails(result);
@@ -1050,14 +1083,43 @@ async function analyzeImageData(imageData, label = "camera") {
     } catch (error) {
         console.error(error);
         if (cameraStatus) {
-            cameraStatus.textContent = "Scan unavailable";
+            cameraStatus.textContent = error.message || "Scan unavailable";
             cameraStatus.className = "status-pill idle";
+        }
+        if (error.scanFailure || error instanceof TypeError) {
+            if (summarySelectors.face_status) summarySelectors.face_status.textContent = "Scan failed";
+            if (summarySelectors.face_risk) summarySelectors.face_risk.textContent = "Not evaluated";
+            if (summarySelectors.face_attention) summarySelectors.face_attention.textContent = "--";
+            if (summarySelectors.face_eye) summarySelectors.face_eye.textContent = "--";
+            if (summarySelectors.face_posture) summarySelectors.face_posture.textContent = "--";
+            if (summarySelectors.face_fatigue) summarySelectors.face_fatigue.textContent = "--";
+            if (summarySelectors.face_confidence) summarySelectors.face_confidence.textContent = "--";
+            if (summarySelectors.overall_score_badge) summarySelectors.overall_score_badge.textContent = "--";
+            if (summarySelectors.score_badges) summarySelectors.score_badges.textContent = "No scores: scan failed";
+            if (summarySelectors.drowsiness_status_badge) summarySelectors.drowsiness_status_badge.textContent = "Not evaluated";
+            if (summarySelectors.confidence_bar) summarySelectors.confidence_bar.style.width = "0%";
+            if (summarySelectors.face_recommendation) summarySelectors.face_recommendation.textContent = error.message || "The server could not analyze this frame. Check server logs and try again.";
+            if (summarySelectors.average_attention) summarySelectors.average_attention.textContent = "--";
+            if (summarySelectors.eye_engagement) summarySelectors.eye_engagement.textContent = "--";
+            if (summarySelectors.posture_score) summarySelectors.posture_score.textContent = "--";
+            if (summarySelectors.active_students) summarySelectors.active_students.textContent = "--";
+            if (summarySelectors.student_count) summarySelectors.student_count.textContent = "Scan failed";
+            if (summarySelectors.room_status) summarySelectors.room_status.textContent = "Error";
+            if (summarySelectors.status_detail) summarySelectors.status_detail.textContent = "No scores were produced";
+            if (summarySelectors.fatigue_alerts) summarySelectors.fatigue_alerts.textContent = "--";
+            if (phoneDetectionStatus) {
+                phoneDetectionStatus.classList.remove("detected");
+                phoneDetectionStatus.classList.add("unavailable");
+                phoneDetectionStatus.textContent = "Phone scan skipped because image analysis failed";
+            }
+            if (phoneOverlay) phoneOverlay.getContext("2d")?.clearRect(0, 0, phoneOverlay.width, phoneOverlay.height);
         }
         throw error;
     }
 }
 
 async function capturePhotoForAnalysis() {
+    if (capturePhotoButton?.disabled) return;
     if (!cameraFeed || !cameraFeed.videoWidth || !localStream) {
         if (cameraStatus) {
             cameraStatus.textContent = "Start camera first";
@@ -1076,6 +1138,16 @@ async function capturePhotoForAnalysis() {
                 cameraStatus.className = "status-pill idle";
             }
             return;
+        }
+        if (capturePhotoButton) {
+            capturePhotoButton.disabled = true;
+            capturePhotoButton.dataset.originalText = capturePhotoButton.textContent;
+            capturePhotoButton.textContent = "Analyzing photo…";
+            capturePhotoButton.setAttribute("aria-busy", "true");
+        }
+        if (cameraStatus) {
+            cameraStatus.textContent = "Analyzing face, fatigue, and phone cues…";
+            cameraStatus.className = "status-pill idle";
         }
         const canvas = document.createElement("canvas");
         canvas.width = cameraFeed.videoWidth;
@@ -1097,8 +1169,39 @@ async function capturePhotoForAnalysis() {
             cameraStatus.textContent = error.message || "Scan unavailable";
             cameraStatus.className = "status-pill idle";
         }
+    } finally {
+        if (capturePhotoButton) {
+            capturePhotoButton.disabled = false;
+            capturePhotoButton.textContent = capturePhotoButton.dataset.originalText || "Capture & analyze photo";
+            capturePhotoButton.removeAttribute("aria-busy");
+        }
     }
 }
+
+function updateCameraFacingButtons() {
+    const facing = dashboardConfig.controls.camera_source || "default";
+    cameraFacingButtons.forEach((button) => {
+        const selected = button.dataset.facingCamera === facing;
+        button.setAttribute("aria-pressed", String(selected));
+        button.classList.toggle("active", selected);
+    });
+}
+
+cameraFacingButtons.forEach((button) => {
+    button.addEventListener("click", async () => {
+        const facing = button.dataset.facingCamera;
+        if (!facing || dashboardConfig.controls.camera_source === facing) return;
+        dashboardConfig.controls.camera_source = facing;
+        if (cameraSourceSelect) cameraSourceSelect.value = facing;
+        saveConfigToStorage();
+        updateCameraFacingButtons();
+        if (localStream) {
+            await toggleCamera();
+            await toggleCamera();
+        }
+    });
+});
+updateCameraFacingButtons();
 
 if (analysisModeSelect) {
     analysisModeSelect.addEventListener("change", (event) => {
@@ -1133,6 +1236,7 @@ if (cameraSourceSelect) {
     cameraSourceSelect.addEventListener("change", async (event) => {
         dashboardConfig.controls.camera_source = event.target.value;
         saveConfigToStorage();
+        updateCameraFacingButtons();
         if (localStream) {
             await toggleCamera();
             await toggleCamera();

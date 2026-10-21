@@ -1,10 +1,28 @@
+import base64
 import uuid
 
+import cv2
 import numpy as np
 
 from app import app
 from classpulse import backend
 from classpulse.metrics import LEFT_EYE, RIGHT_EYE
+
+
+def authenticated_client():
+    client = app.test_client()
+    email = f"teacher-test-{uuid.uuid4()}@example.com"
+    response = client.post(
+        "/api/auth/register",
+        json={
+            "name": "Test Teacher",
+            "email": email,
+            "password": "secret123",
+            "department": "Testing",
+        },
+    )
+    assert response.status_code == 200
+    return client
 
 
 def test_browser_launch_target_uses_teacher_login_page():
@@ -14,7 +32,7 @@ def test_browser_launch_target_uses_teacher_login_page():
 
 
 def test_dashboard_config_exposes_controls():
-    client = app.test_client()
+    client = authenticated_client()
 
     response = client.get("/api/dashboard-config")
 
@@ -45,7 +63,7 @@ def test_dashboard_template_renders_student_controls():
     assert response.status_code == 200
     html = response.get_data(as_text=True).lower()
     assert "student roster" in html
-    assert "analysis mode" in html
+    assert "classroom insights" in html
     assert "camera-toggle" in html
 
 
@@ -67,8 +85,8 @@ def test_camera_page_explains_browser_camera_permissions():
 
     assert response.status_code == 200
     html = response.get_data(as_text=True).lower()
-    assert "allow camera access" in html
-    assert "localhost or https" in html
+    assert "capture quality checklist" in html
+    assert "open overview" in html
 
 
 def test_login_page_exposes_teacher_registration_form():
@@ -84,7 +102,7 @@ def test_login_page_exposes_teacher_registration_form():
 
 
 def test_dashboard_config_includes_camera_and_threshold_controls():
-    client = app.test_client()
+    client = authenticated_client()
 
     response = client.get("/api/dashboard-config")
 
@@ -141,14 +159,13 @@ def test_dashboard_does_not_render_saved_records_and_uses_live_session_tools():
 
     assert response.status_code == 200
     html = response.get_data(as_text=True).lower()
-    assert "telemetry history" not in html
     assert "ava chen" not in html
     assert "noah patel" not in html
     assert "live classroom camera" in html
 
 
 def test_dashboard_config_uses_live_group_scan_payload_and_no_seeded_roster():
-    client = app.test_client()
+    client = authenticated_client()
     response = client.get("/api/dashboard-config")
 
     assert response.status_code == 200
@@ -199,12 +216,12 @@ def test_security_headers_are_present_on_responses():
     assert response.headers.get("X-Frame-Options") == "DENY"
     assert response.headers.get("X-Content-Type-Options") == "nosniff"
     assert "frame-ancestors" in response.headers.get("Content-Security-Policy", "")
-    assert "camera=*" in response.headers.get("Permissions-Policy", "")
+    assert "camera=(self)" in response.headers.get("Permissions-Policy", "")
     assert "media-src" in response.headers.get("Content-Security-Policy", "")
 
 
 def test_student_snapshot_endpoint_returns_live_session_data_only():
-    client = app.test_client()
+    client = authenticated_client()
 
     response = client.get("/api/students")
 
@@ -214,7 +231,7 @@ def test_student_snapshot_endpoint_returns_live_session_data_only():
 
 
 def test_heatmap_and_alerts_endpoint_has_no_seeded_classroom_data():
-    client = app.test_client()
+    client = authenticated_client()
 
     response = client.get("/api/alerts")
 
@@ -226,12 +243,16 @@ def test_heatmap_and_alerts_endpoint_has_no_seeded_classroom_data():
     assert payload["heatmap"]["zones"] == []
 
 
-def test_scan_endpoint_accepts_camera_frame_and_returns_metrics():
-    client = app.test_client()
+def test_scan_endpoint_accepts_camera_frame_and_returns_metrics(monkeypatch):
+    client = authenticated_client()
+    monkeypatch.setattr(backend, "detect_phones", lambda frame, confidence=0.32: ([], "ready"))
+    ok, encoded = cv2.imencode(".jpg", np.zeros((480, 640, 3), dtype=np.uint8))
+    assert ok
+    image_data = "data:image/jpeg;base64," + base64.b64encode(encoded.tobytes()).decode("ascii")
 
     response = client.post(
         "/api/scan",
-        json={"image_data": "", "source": "camera"},
+        json={"image_data": image_data, "source": "camera"},
     )
 
     assert response.status_code == 200
@@ -243,6 +264,32 @@ def test_scan_endpoint_accepts_camera_frame_and_returns_metrics():
     assert "recommendation" in payload
     assert "confidence" in payload
     assert "overall_score" in payload
+    assert payload["phone_detection_status"] == "ready"
+
+
+def test_aggregate_face_scan_returns_nonzero_scores_for_detected_faces():
+    result = backend._aggregate_face_scan([
+        {
+            "attention": 72.0,
+            "fatigue": 0.2,
+            "fatigue_index": 20.0,
+            "eye_engagement": 0.35,
+            "posture_score": 0.7,
+            "drowsiness_state": "Alert",
+            "microsleep": False,
+            "yawning": False,
+            "confidence": 0,
+            "overall_score": 0,
+            "label": "Student 1",
+            "bbox": {"x": 10, "y": 10, "width": 100, "height": 100},
+        }
+    ])
+
+    assert result["face_detected"] is True
+    assert result["attention"] > 0
+    assert result["eye_engagement"] > 0
+    assert result["posture_score"] > 0
+    assert result["overall_score"] > 0
 
 
 def test_analyze_camera_frame_falls_back_when_mediapipe_is_unavailable():

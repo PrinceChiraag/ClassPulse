@@ -1,4 +1,5 @@
 import base64
+import logging
 import os
 import re
 import secrets
@@ -18,13 +19,14 @@ except Exception:  # pragma: no cover - fallback when dependency is unavailable
     mp = None
 
 from classpulse.metrics import compute_attention_fatigue
-from classpulse.phone_detection import detect_phones
+from classpulse.phone_detection import detect_phones, phone_detector_runtime_status
 from classpulse.store import TeacherStore, TelemetryStore, validate_email
 
 
 EMAIL_PATTERN = re.compile(r"^[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+$")
 _scan_tracks = {}
 _scan_tracks_lock = threading.Lock()
+logger = logging.getLogger(__name__)
 
 
 def _face_bbox(face_landmarks, frame_width: int, frame_height: int) -> dict:
@@ -107,6 +109,7 @@ def build_face_summary(metrics: dict) -> dict:
         "yawning": yawning,
         "face_count": metrics.get("face_count", 1 if face_detected else 0),
         "faces": metrics.get("faces", []),
+        "analysis_mode": metrics.get("analysis_mode", "landmark"),
     }
     if "student_details" in metrics:
         summary["student_details"] = metrics["student_details"]
@@ -116,8 +119,20 @@ def build_face_summary(metrics: dict) -> dict:
 def _fallback_face_metrics(frame):
     gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
     gray = cv2.equalizeHist(gray)
-    face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_frontalface_default.xml")
-    faces = face_cascade.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=5, minSize=(40, 40))
+    faces = ()
+    # Try the more tolerant frontal models when the default cascade misses a
+    # face, so a MediaPipe failure does not automatically become an empty scan.
+    for cascade_name, neighbors in (
+        ("haarcascade_frontalface_default.xml", 4),
+        ("haarcascade_frontalface_alt2.xml", 3),
+        ("haarcascade_frontalface_alt.xml", 3),
+    ):
+        cascade = cv2.CascadeClassifier(cv2.data.haarcascades + cascade_name)
+        if cascade.empty():
+            continue
+        faces = cascade.detectMultiScale(gray, scaleFactor=1.08, minNeighbors=neighbors, minSize=(32, 32))
+        if len(faces):
+            break
 
     if len(faces) == 0:
         return {
@@ -142,16 +157,18 @@ def _fallback_face_metrics(frame):
         attention = max(0.0, min(100.0, (face_area / frame_area) * 1000 + brightness * 45 + edge_focus * 25))
         eye_engagement = max(0.0, min(1.0, brightness * 1.5 + edge_focus * 0.4))
         fatigue = max(0.0, min(1.0, (1.0 - (attention / 100.0)) * 0.8 + (1.0 - posture_score) * 0.35))
-        entries.append({"attention": attention, "fatigue": fatigue, "eye_engagement": eye_engagement,
+        entries.append({"attention": attention, "fatigue": fatigue, "fatigue_index": round(fatigue * 100, 1),
+                        "drowsiness_state": "Basic estimate", "microsleep": False, "yawning": False,
+                        "eye_engagement": eye_engagement,
                         "posture_score": posture_score, "label": f"Student {index + 1}",
                         "face_index": index, "bbox": {"x": int(x), "y": int(y), "width": int(w), "height": int(h)}})
     if len(entries) == 1:
-        return {**entries[0], "face_detected": True, "face_count": 1, "faces": entries}
+        return {**entries[0], "face_detected": True, "face_count": 1, "faces": entries, "analysis_mode": "basic-fallback"}
     return {"attention": round(sum(e["attention"] for e in entries) / len(entries), 1),
             "fatigue": round(sum(e["fatigue"] for e in entries) / len(entries), 3),
             "eye_engagement": round(sum(e["eye_engagement"] for e in entries) / len(entries), 3),
             "posture_score": round(sum(e["posture_score"] for e in entries) / len(entries), 3),
-            "face_detected": True, "face_count": len(entries), "faces": entries}
+            "face_detected": True, "face_count": len(entries), "faces": entries, "analysis_mode": "basic-fallback"}
 
 
 def _aggregate_face_scan(face_entries):
@@ -203,8 +220,11 @@ def _add_phone_scan(summary, frame, detection_settings=None):
 def analyze_camera_frame(frame, detection_mode="multi-face", detection_settings=None, scan_session="default"):
     if mp is None or not hasattr(mp, "solutions"):
         fallback = _fallback_face_metrics(frame)
+        fallback["analysis_mode"] = "basic-fallback"
         return _add_phone_scan(build_face_summary(fallback), frame, detection_settings)
 
+    face_mesh = None
+    pose = None
     try:
         settings = detection_settings or {}
         max_faces = 1 if str(detection_mode or "multi-face").lower() == "single-user" else 20
@@ -249,22 +269,37 @@ def analyze_camera_frame(frame, detection_mode="multi-face", detection_settings=
                     else:
                         local_state = {"ear": deque(maxlen=90), "mar": deque(maxlen=90), "pitch": deque(maxlen=90)}
                         tracks.append({"center": center, "seen": timestamp, "state": local_state})
-                    pose_landmarks = pose_result.pose_landmarks if settings.get("posture_analysis", True) else None
+                    # Pose processes the whole frame and can lock onto a different
+                    # person in a multi-face classroom. Face landmarks are more
+                    # reliable for the individual eye based evaluation; keep the
+                    # neutral posture fallback when pose is ambiguous.
+                    pose_landmarks = pose_result.pose_landmarks if settings.get("posture_analysis", True) and max_faces == 1 else None
                     metrics = compute_attention_fatigue(face.landmark, pose_landmarks, settings, rolling_state=local_state)
                     if not settings.get("fatigue_detection", True):
                         metrics.update({"fatigue": 0.0, "fatigue_index": 0.0, "microsleep": False, "yawning": False, "drowsiness_state": "Disabled"})
                     metrics["label"] = f"Student {index + 1}"
                     metrics["face_index"] = index
                     metrics["bbox"] = bbox
+                    metrics["confidence"] = round(max(0.0, min(100.0,
+                        (metrics.get("attention", 0.0) * 0.55)
+                        + (metrics.get("posture_score", 0.0) * 25)
+                        + (metrics.get("eye_engagement", 0.0) * 20))), 1)
+                    metrics["overall_score"] = metrics["confidence"]
                     face_entries.append(metrics)
 
-        face_mesh.close()
-        pose.close()
         if face_entries:
             return _add_phone_scan(_aggregate_face_scan(face_entries), frame, settings)
         return _add_phone_scan(build_face_summary(_fallback_face_metrics(frame)), frame, settings)
     except Exception:
-        return _add_phone_scan(build_face_summary(_fallback_face_metrics(frame)), frame, detection_settings)
+        logger.exception("MediaPipe face/fatigue analysis failed; using basic fallback")
+        fallback = _fallback_face_metrics(frame)
+        fallback["analysis_mode"] = "basic-fallback"
+        return _add_phone_scan(build_face_summary(fallback), frame, detection_settings)
+    finally:
+        if face_mesh is not None:
+            face_mesh.close()
+        if pose is not None:
+            pose.close()
 
 
 def create_app():
@@ -445,7 +480,12 @@ def create_app():
 
     @app.get("/health")
     def health():
-        return jsonify({"status": "ok", "service": "ClassPulse", "version": "1.0.0"})
+        return jsonify({
+            "status": "ok",
+            "service": "ClassPulse",
+            "version": "1.0.0",
+            "phone_detector": phone_detector_runtime_status(),
+        })
 
     @app.post("/api/auth/register")
     def register_teacher():
@@ -673,7 +713,7 @@ def create_app():
                 "confidence": 0.0,
                 "overall_score": 0.0,
                 "face_detected": False,
-            }), 500
+            }), 400
 
         try:
             if image_data.startswith("data:image"):
@@ -698,7 +738,7 @@ def create_app():
                     "confidence": 0.0,
                     "overall_score": 0.0,
                     "face_detected": False,
-                })
+                }), 400
             if frame.shape[0] * frame.shape[1] > 12_000_000:
                 return jsonify({"error": "Image dimensions exceed the 12 megapixel limit.", "status": "invalid-image"}), 413
 
@@ -722,20 +762,16 @@ def create_app():
                 except ValueError as exc:
                     return jsonify({"error": str(exc), "status": "invalid-student"}), 400
 
-            return jsonify({"status": "ok", **metrics})
-        except Exception:  # pragma: no cover - guard for invalid browser payloads
+            return jsonify({"status": "ok", "frame_width": int(frame.shape[1]), "frame_height": int(frame.shape[0]), **metrics})
+        except Exception as exc:  # pragma: no cover - guard for invalid browser payloads
+            logger.exception("Scan request failed")
+            message = "Analysis could not complete. Check the image and camera, then try again."
+            if not production:
+                message = f"Analysis failed: {type(exc).__name__}: {exc}"
             return jsonify({
-                "attention": 0.0,
-                "fatigue": 1.0,
                 "status": "error",
-                "risk_level": "High",
-                "recommendation": "The analysis could not complete. Check the image and camera, then try again.",
-                "eye_engagement": 0.0,
-                "posture_score": 0.0,
-                "confidence": 0.0,
-                "overall_score": 0.0,
-                "face_detected": False,
-            })
+                "error": message,
+            }), 500
 
     @app.post("/api/telemetry")
     @app.post("/api/v1/telemetry")
