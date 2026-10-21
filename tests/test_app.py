@@ -3,6 +3,7 @@ import uuid
 
 import cv2
 import numpy as np
+from types import SimpleNamespace
 
 from app import app
 from classpulse import backend
@@ -290,6 +291,64 @@ def test_aggregate_face_scan_returns_nonzero_scores_for_detected_faces():
     assert result["eye_engagement"] > 0
     assert result["posture_score"] > 0
     assert result["overall_score"] > 0
+
+
+def test_multi_face_scan_returns_scores_without_starting_single_person_pose(monkeypatch):
+    landmarks = [SimpleNamespace(x=0.5, y=0.5) for _ in range(468)]
+
+    class FakeFaceMesh:
+        def __init__(self, **kwargs):
+            pass
+
+        def process(self, _image):
+            return SimpleNamespace(multi_face_landmarks=[SimpleNamespace(landmark=landmarks)])
+
+        def close(self):
+            pass
+
+    def unexpected_pose(**_kwargs):
+        raise AssertionError("multi-face mode should not start single-person pose analysis")
+
+    fake_mp = SimpleNamespace(solutions=SimpleNamespace(
+        face_mesh=SimpleNamespace(FaceMesh=FakeFaceMesh),
+        pose=SimpleNamespace(Pose=unexpected_pose),
+    ))
+    monkeypatch.setattr(backend, "mp", fake_mp)
+    monkeypatch.setattr(backend, "detect_phones", lambda _frame, confidence=0.2: ([], "ready"))
+    monkeypatch.setattr(backend, "compute_attention_fatigue", lambda *_args, **_kwargs: {
+        "attention": 72.0, "fatigue": 0.2, "fatigue_index": 20.0,
+        "eye_engagement": 0.35, "posture_score": 0.7,
+        "drowsiness_state": "Alert", "microsleep": False, "yawning": False,
+    })
+
+    result = backend.analyze_camera_frame(np.zeros((240, 320, 3), dtype=np.uint8))
+
+    assert result["face_detected"] is True
+    assert result["attention"] > 0
+    assert result["eye_engagement"] > 0
+    assert result["posture_score"] > 0
+    assert result["overall_score"] > 0
+
+
+def test_phone_detector_uses_recall_friendly_model_settings(monkeypatch):
+    from classpulse import phone_detection
+
+    captured = {}
+
+    class FakeModel:
+        names = {67: "cell phone"}
+
+        def predict(self, _frame, **kwargs):
+            captured.update(kwargs)
+            return [SimpleNamespace(boxes=None)]
+
+    monkeypatch.setattr(phone_detection, "_get_model", lambda: FakeModel())
+    detections, status = phone_detection.detect_phones(np.zeros((120, 120, 3), dtype=np.uint8))
+
+    assert status == "ready"
+    assert detections == []
+    assert captured["conf"] == 0.2
+    assert captured["imgsz"] == 960
 
 
 def test_analyze_camera_frame_falls_back_when_mediapipe_is_unavailable():

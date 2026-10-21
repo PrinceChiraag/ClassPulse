@@ -210,7 +210,7 @@ def _add_phone_scan(summary, frame, detection_settings=None):
         summary["phone_detection_status"] = "disabled"
         summary["phone_alert"] = False
         return summary
-    detections, detector_status = detect_phones(frame, confidence=float(settings.get("phone_confidence", 0.32)))
+    detections, detector_status = detect_phones(frame, confidence=float(settings.get("phone_confidence", 0.2)))
     summary["phone_detections"] = detections
     summary["phone_detection_status"] = detector_status
     summary["phone_alert"] = bool(detections)
@@ -235,15 +235,28 @@ def analyze_camera_frame(frame, detection_mode="multi-face", detection_settings=
             min_detection_confidence=0.5,
             min_tracking_confidence=0.5,
         )
-        pose = mp.solutions.pose.Pose(
-            static_image_mode=False,
-            model_complexity=1,
-            min_detection_confidence=0.5,
-            min_tracking_confidence=0.5,
-        )
+        # Pose is a single-person model. Skip it entirely in classroom mode;
+        # a whole-frame pose failure must not discard successful face landmarks.
+        pose_result = None
+        if max_faces == 1 and settings.get("posture_analysis", True):
+            try:
+                pose = mp.solutions.pose.Pose(
+                    static_image_mode=False,
+                    model_complexity=1,
+                    min_detection_confidence=0.5,
+                    min_tracking_confidence=0.5,
+                )
+                pose_result = pose.process(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
+            except Exception:
+                logger.exception("Pose analysis failed; continuing with face-landmark posture fallback")
+                if pose is not None:
+                    try:
+                        pose.close()
+                    except Exception:
+                        logger.exception("Failed to close pose analyzer")
+                    pose = None
         rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         face_result = face_mesh.process(rgb)
-        pose_result = pose.process(rgb)
 
         face_entries = []
         if face_result.multi_face_landmarks:
@@ -273,7 +286,7 @@ def analyze_camera_frame(frame, detection_mode="multi-face", detection_settings=
                     # person in a multi-face classroom. Face landmarks are more
                     # reliable for the individual eye based evaluation; keep the
                     # neutral posture fallback when pose is ambiguous.
-                    pose_landmarks = pose_result.pose_landmarks if settings.get("posture_analysis", True) and max_faces == 1 else None
+                    pose_landmarks = getattr(pose_result, "pose_landmarks", None) if pose_result is not None else None
                     metrics = compute_attention_fatigue(face.landmark, pose_landmarks, settings, rolling_state=local_state)
                     if not settings.get("fatigue_detection", True):
                         metrics.update({"fatigue": 0.0, "fatigue_index": 0.0, "microsleep": False, "yawning": False, "drowsiness_state": "Disabled"})
@@ -296,10 +309,12 @@ def analyze_camera_frame(frame, detection_mode="multi-face", detection_settings=
         fallback["analysis_mode"] = "basic-fallback"
         return _add_phone_scan(build_face_summary(fallback), frame, detection_settings)
     finally:
-        if face_mesh is not None:
-            face_mesh.close()
-        if pose is not None:
-            pose.close()
+        for analyzer in (face_mesh, pose):
+            if analyzer is not None:
+                try:
+                    analyzer.close()
+                except Exception:
+                    logger.exception("Failed to close MediaPipe analyzer")
 
 
 def create_app():
@@ -620,7 +635,7 @@ def create_app():
                     "face_blur": False,
                     "preview_blur": False,
                     "phone_detection": True,
-                    "phone_confidence": 0.32,
+                    "phone_confidence": 0.2,
                     "show_phone_boxes": True,
                     "sound_alerts": False,
                     "capture_interval": 5,

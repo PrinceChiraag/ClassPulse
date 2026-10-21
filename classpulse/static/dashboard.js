@@ -88,7 +88,7 @@ let dashboardConfig = {
         face_blur: false,
         preview_blur: false,
         phone_detection: true,
-        phone_confidence: 0.32,
+        phone_confidence: 0.2,
         show_phone_boxes: true,
         sound_alerts: false,
         auto_refresh: true,
@@ -1012,7 +1012,7 @@ async function analyzeImageData(imageData, label = "camera") {
                     posture_analysis: dashboardConfig.controls.posture_analysis !== false,
                     fatigue_detection: dashboardConfig.controls.fatigue_detection !== false,
                     phone_detection: dashboardConfig.controls.phone_detection !== false,
-                    phone_confidence: Number(dashboardConfig.controls.phone_confidence ?? 0.32),
+                    phone_confidence: Number(dashboardConfig.controls.phone_confidence ?? 0.2),
                 },
             }),
         });
