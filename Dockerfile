@@ -11,16 +11,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 COPY requirements.txt ./
 
-RUN pip install --no-cache-dir -r requirements.txt && \
-    pip uninstall -y opencv-python opencv-contrib-python && \
-    pip install --no-cache-dir --no-deps opencv-python-headless
+RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
 
-# Validate that the detector package and bundled weights are present without
-# deserializing the PyTorch model during the image build. Full model loading is
-# performed by the app at runtime and exposed through /health.
-RUN python -c "from pathlib import Path; from ultralytics import YOLO; weights = Path('/app/yolo11n.pt'); assert weights.is_file() and weights.stat().st_size > 0, 'Bundled phone detector weights are missing or empty'; print('Ultralytics installed; bundled phone detector weights present')"
+# Validate the OpenCV API Ultralytics imports and confirm bundled model weights.
+# Full model deserialization is left to runtime startup/health checks.
+RUN python -c "from pathlib import Path; import cv2; from ultralytics import YOLO; weights = Path('/app/yolo11n.pt'); assert hasattr(cv2, 'imshow'), 'OpenCV build is incompatible with Ultralytics'; assert weights.is_file() and weights.stat().st_size > 0, 'Bundled phone detector weights are missing or empty'; print('OpenCV, Ultralytics, and bundled detector weights are ready')"
 
 ENV HOST=0.0.0.0
 ENV PORT=5000
