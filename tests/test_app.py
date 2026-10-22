@@ -295,16 +295,18 @@ def test_aggregate_face_scan_returns_nonzero_scores_for_detected_faces():
 
 def test_multi_face_scan_returns_scores_without_starting_single_person_pose(monkeypatch):
     landmarks = [SimpleNamespace(x=0.5, y=0.5) for _ in range(468)]
+    face_mesh_instances = []
 
     class FakeFaceMesh:
         def __init__(self, **kwargs):
-            pass
+            self.closed = False
+            face_mesh_instances.append(self)
 
         def process(self, _image):
             return SimpleNamespace(multi_face_landmarks=[SimpleNamespace(landmark=landmarks)])
 
         def close(self):
-            pass
+            self.closed = True
 
     def unexpected_pose(**_kwargs):
         raise AssertionError("multi-face mode should not start single-person pose analysis")
@@ -314,7 +316,12 @@ def test_multi_face_scan_returns_scores_without_starting_single_person_pose(monk
         pose=SimpleNamespace(Pose=unexpected_pose),
     ))
     monkeypatch.setattr(backend, "mp", fake_mp)
-    monkeypatch.setattr(backend, "detect_phones", lambda _frame, confidence=0.2: ([], "ready"))
+
+    def phone_detector(_frame, confidence=0.2):
+        assert face_mesh_instances[0].closed is True
+        return [], "ready"
+
+    monkeypatch.setattr(backend, "detect_phones", phone_detector)
     monkeypatch.setattr(backend, "compute_attention_fatigue", lambda *_args, **_kwargs: {
         "attention": 72.0, "fatigue": 0.2, "fatigue_index": 20.0,
         "eye_engagement": 0.35, "posture_score": 0.7,
@@ -392,7 +399,7 @@ def test_phone_detector_uses_recall_friendly_model_settings(monkeypatch):
     assert status == "ready"
     assert detections == []
     assert captured["conf"] == 0.2
-    assert captured["imgsz"] == 960
+    assert captured["imgsz"] == 640
 
 
 def test_analyze_camera_frame_falls_back_when_mediapipe_is_unavailable():

@@ -91,9 +91,9 @@ def detect_phones(frame, confidence=0.2):
                 return detections, "fallback" if detections else "no-phone-class"
         # Ultralytics models are shared by threaded Flask requests; serialize inference.
         with _model_lock:
-            # A larger inference size makes small phones in classroom frames
-            # more visible to the COCO model while keeping CPU cost bounded.
-            result = model.predict(frame, classes=class_ids, conf=float(confidence), imgsz=960, verbose=False)[0]
+            # Keep inference compact for small hosted workers. Ultralytics
+            # rescales larger camera frames to this size before inference.
+            result = model.predict(frame, classes=class_ids, conf=float(confidence), imgsz=640, verbose=False)[0]
         detections = []
         if result.boxes is not None:
             for box in result.boxes:

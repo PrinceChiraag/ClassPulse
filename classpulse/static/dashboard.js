@@ -1159,12 +1159,13 @@ async function capturePhotoForAnalysis() {
             cameraStatus.className = "status-pill idle";
         }
         const canvas = document.createElement("canvas");
-        canvas.width = cameraFeed.videoWidth;
-        canvas.height = cameraFeed.videoHeight;
+        const captureScale = Math.min(1, 1280 / Math.max(cameraFeed.videoWidth, cameraFeed.videoHeight));
+        canvas.width = Math.round(cameraFeed.videoWidth * captureScale);
+        canvas.height = Math.round(cameraFeed.videoHeight * captureScale);
         const context = canvas.getContext("2d");
         context.drawImage(cameraFeed, 0, 0, canvas.width, canvas.height);
 
-        const imageData = canvas.toDataURL("image/jpeg", 0.9);
+        const imageData = canvas.toDataURL("image/jpeg", 0.82);
         setCapturedPhoto(imageData);
         const scan = await analyzeImageData(imageData, "student-photo");
         if (scan?.saved_scan && cameraStatus) {

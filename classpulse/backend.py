@@ -225,6 +225,17 @@ def analyze_camera_frame(frame, detection_mode="multi-face", detection_settings=
 
     face_mesh = None
     pose = None
+
+    def close_face_analyzers():
+        nonlocal face_mesh, pose
+        for analyzer in (face_mesh, pose):
+            if analyzer is not None:
+                try:
+                    analyzer.close()
+                except Exception:
+                    logger.exception("Failed to close MediaPipe analyzer")
+        face_mesh = pose = None
+
     try:
         settings = detection_settings or {}
         max_faces = 1 if str(detection_mode or "multi-face").lower() == "single-user" else 20
@@ -346,6 +357,9 @@ def analyze_camera_frame(frame, detection_mode="multi-face", detection_settings=
                     face_entries.append(metrics)
 
         if face_entries:
+            # MediaPipe and PyTorch/YOLO are both memory intensive. Close
+            # landmark graphs before loading/running the phone detector.
+            close_face_analyzers()
             if face_entries[0].get("analysis_mode") == "face-detection-fallback":
                 summary = build_face_summary({
                     **face_entries[0], "face_detected": True, "face_count": len(face_entries),
@@ -354,9 +368,11 @@ def analyze_camera_frame(frame, detection_mode="multi-face", detection_settings=
                 return _add_phone_scan(summary, frame, settings)
             result = _aggregate_face_scan(face_entries)
             return _add_phone_scan(result, frame, settings)
+        close_face_analyzers()
         return _add_phone_scan(build_face_summary(_fallback_face_metrics(frame)), frame, settings)
     except Exception:
         logger.exception("MediaPipe face/fatigue analysis failed; using basic fallback")
+        close_face_analyzers()
         fallback = _fallback_face_metrics(frame)
         fallback["analysis_mode"] = "basic-fallback"
         return _add_phone_scan(build_face_summary(fallback), frame, detection_settings)

@@ -1875,6 +1875,42 @@ input[type="range"] { accent-color: #087f78; }
     .student-identity-fields label:first-child { grid-column: auto; }
 }
 
+/* Portrait camera layout tuned for handheld screens. */
+@media (max-width: 640px) {
+    .camera-frame {
+        aspect-ratio: 4 / 5;
+        min-height: 0;
+        max-height: min(112vw, 520px);
+        border-radius: 16px;
+    }
+    .camera-frame video { object-position: center; }
+    .camera-panel .panel-header { align-items: flex-start; }
+    .camera-panel .panel-header h2 { font-size: 1rem; }
+    .camera-panel .status-pill { max-width: 52%; text-align: center; line-height: 1.35; }
+    .camera-facing-controls { display: grid; grid-template-columns: auto repeat(2, minmax(0, 1fr)); }
+    .camera-facing-button { width: 100%; }
+    .camera-actions { position: sticky; bottom: max(8px, env(safe-area-inset-bottom)); z-index: 8; padding: 9px; border: 1px solid rgba(180, 205, 200, .72); border-radius: 16px; background: rgba(247, 251, 249, .94); box-shadow: 0 10px 28px rgba(20, 48, 49, .16); backdrop-filter: blur(14px); }
+    .camera-actions .primary-button { min-height: 52px; }
+    .face-details-box { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+    .face-details-box > h3,
+    .face-details-box > .face-phone-warning,
+    .face-details-box > .score-summary-card,
+    .face-details-box > .confidence-meter,
+    .face-details-box > #face-detail-recommendation { grid-column: 1 / -1; }
+    .face-detail-row { display: grid; align-content: space-between; gap: 7px; min-width: 0; min-height: 62px; padding: 10px; border: 1px solid #e6efec; border-radius: 12px; background: #fbfdfc; font-size: .74rem; }
+    .face-detail-row strong { overflow-wrap: anywhere; font-size: .86rem; }
+    .score-badges { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .score-badge { justify-content: center; min-width: 0; padding: 8px 6px; text-align: center; }
+    .phone-detection-status { max-width: calc(100% - 18px); white-space: normal; text-align: center; }
+}
+
+@media (max-width: 380px) {
+    .camera-frame { aspect-ratio: 3 / 4; }
+    .face-details-box { grid-template-columns: 1fr 1fr; }
+    .camera-actions { gap: 6px; padding: 7px; }
+    .camera-actions button { font-size: .8rem; }
+}
+
 /* Heading and body copy hierarchy for every portal page. */
 :root {
     --heading-ink: #152d36;
