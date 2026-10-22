@@ -61,6 +61,7 @@ class _SQLiteConnection:
 
 class TeacherStore:
     def __init__(self, db_path: str | Path = Path(__file__).resolve().parent / "data" / "classpulse.db"):
+        self.sqlite_source_path = Path(db_path)
         database_url = os.getenv("DATABASE_URL", "").strip()
         if database_url.startswith("postgres://"):
             database_url = database_url.replace("postgres://", "postgresql://", 1)
@@ -69,7 +70,7 @@ class TeacherStore:
         self.database_url = database_url
         self.use_postgres = self.database_url.startswith(("postgresql://", "postgresql+"))
         self.database_backend = "postgresql" if self.use_postgres else "sqlite"
-        self.db_path = Path(db_path) if not self.use_postgres else None
+        self.db_path = self.sqlite_source_path if not self.use_postgres else None
         if not self.use_postgres:
             self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self.init_db()
@@ -174,8 +175,64 @@ class TeacherStore:
             )
             if self.use_postgres:
                 connection.execute(
+                    "CREATE TABLE IF NOT EXISTS classpulse_legacy_imports (source_path TEXT PRIMARY KEY, imported_at TEXT DEFAULT (CURRENT_TIMESTAMP::text))"
+                )
+                connection.execute(
                     "SELECT setval(pg_get_serial_sequence('teachers', 'id'), GREATEST(COALESCE((SELECT MAX(id) FROM teachers), 1), 1), true)"
                 )
+        if self.use_postgres:
+            self._import_legacy_sqlite_accounts()
+
+    def _import_legacy_sqlite_accounts(self) -> None:
+        """Copy existing login records once when a mounted SQLite DB is available."""
+        source_path = self.sqlite_source_path
+        if not source_path.is_file() or source_path.stat().st_size == 0:
+            return
+        source_key = str(source_path.resolve())
+        with self._connect() as connection:
+            imported = connection.execute(
+                "SELECT 1 FROM classpulse_legacy_imports WHERE source_path = ?", (source_key,)
+            ).fetchone()
+        if imported:
+            return
+
+        source = sqlite3.connect(source_path)
+        source.row_factory = sqlite3.Row
+        try:
+            columns = {row["name"] for row in source.execute("PRAGMA table_info(teachers)").fetchall()}
+            if not {"id", "name", "email", "password_hash"}.issubset(columns):
+                return
+            username_column = "username" if "username" in columns else None
+            with self._connect() as connection:
+                for row in source.execute("SELECT * FROM teachers ORDER BY id").fetchall():
+                    email = str(row["email"] or "").strip().lower()
+                    if not validate_email(email) or not row["password_hash"]:
+                        continue
+                    existing = connection.execute(
+                        "SELECT id FROM teachers WHERE lower(email) = ?", (email,)
+                    ).fetchone()
+                    if existing:
+                        continue
+                    username = str(row[username_column] or "").strip().lower() if username_column else ""
+                    if not validate_username(username):
+                        username = f"teacher{row['id']}"
+                    for attempt in range(100):
+                        collision = connection.execute(
+                            "SELECT id FROM teachers WHERE lower(username) = ?", (username,)
+                        ).fetchone()
+                        if not collision:
+                            break
+                        username = f"teacher{row['id']}-{attempt + 1}"
+                    connection.execute(
+                        "INSERT INTO teachers (name, username, email, password_hash, department) VALUES (?, ?, ?, ?, ?) ON CONFLICT DO NOTHING",
+                        (str(row["name"] or "Teacher")[:100], username, email, row["password_hash"], row["department"] if "department" in columns else ""),
+                    )
+                connection.execute(
+                    "INSERT INTO classpulse_legacy_imports (source_path) VALUES (?) ON CONFLICT DO NOTHING",
+                    (source_key,),
+                )
+        finally:
+            source.close()
 
     def remove_demo_teacher(self) -> None:
         with self._connect() as connection:
