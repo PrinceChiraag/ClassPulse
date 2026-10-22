@@ -219,6 +219,12 @@ function renderControls() {
         detectionModeSelect.value = modeValue;
     }
 
+    if (phoneConfidenceInput) {
+        const value = Number(dashboardConfig.controls.phone_confidence ?? 0.2);
+        phoneConfidenceInput.value = String(value);
+        if (phoneConfidenceLabel) phoneConfidenceLabel.textContent = value.toFixed(2);
+    }
+
     if (earBlinkCutoffInput) {
         const value = Number(dashboardConfig.controls.ear_blink_cutoff ?? 0.18);
         earBlinkCutoffInput.value = String(value);
@@ -728,7 +734,7 @@ function renderFaceDetails(payload) {
     const faceEntries = Array.isArray(detail.faces) ? detail.faces : (detail.face_detected ? [detail] : []);
     const primaryFace = faceEntries[0] || {};
     const hasFace = faceEntries.length > 0;
-    const statusText = detail.analysis_mode === "basic-fallback" && hasFace
+    const statusText = ["basic-fallback", "face-detection-fallback"].includes(detail.analysis_mode) && hasFace
         ? "Basic estimate · detailed face analysis unavailable"
         : detail.status || (hasFace ? (faceEntries.length > 1 ? `Multi-face scan: ${faceEntries.length} students` : "Face analyzed") : "No clear face detected");
     const confidenceValue = Number(primaryFace.confidence ?? detail.confidence ?? 0);
@@ -747,7 +753,10 @@ function renderFaceDetails(payload) {
     }
 
     if (!hasFace) {
-        // Keep the explicit retry message above; no per-face cards can be created.
+        // The empty state is rendered above; clear any stale roster from an earlier scan.
+        renderStudentRoster([]);
+        renderHeatmap([]);
+        if (alertList) alertList.innerHTML = '<li class="alert-item warning"><strong>No face detected</strong><span>Scan not analyzed</span><small>Improve lighting and keep your face centered.</small></li>';
     } else if (faceEntries.length > 1) {
         const roster = faceEntries.map((face, index) => ({
             name: face.label || `Student ${index + 1}`,
@@ -805,34 +814,34 @@ function renderFaceDetails(payload) {
         summarySelectors.face_risk.textContent = detail.risk_level || (hasFace ? "Moderate" : "Needs reset");
     }
     if (summarySelectors.face_attention) {
-        summarySelectors.face_attention.textContent = detail.attention !== undefined || faceEntries.length > 0 ? `${attentionScore.toFixed(1)}/100` : "0.0/100";
+        summarySelectors.face_attention.textContent = hasFace ? `${attentionScore.toFixed(1)}/100` : "Awaiting face";
     }
     if (summarySelectors.face_eye) {
-        summarySelectors.face_eye.textContent = `${eyeScore.toFixed(1)}/100`;
+        summarySelectors.face_eye.textContent = hasFace ? `${eyeScore.toFixed(1)}/100` : "Awaiting face";
     }
     if (summarySelectors.face_posture) {
-        summarySelectors.face_posture.textContent = `${postureScore.toFixed(1)}/100`;
+        summarySelectors.face_posture.textContent = hasFace ? `${postureScore.toFixed(1)}/100` : "Awaiting face";
     }
     if (summarySelectors.face_fatigue) {
         summarySelectors.face_fatigue.textContent = hasFace ? `${fatigueScore.toFixed(1)}%` : "Awaiting face";
     }
     if (summarySelectors.face_confidence) {
-        summarySelectors.face_confidence.textContent = `${overallScore.toFixed(1)}/100`;
+        summarySelectors.face_confidence.textContent = hasFace ? `${overallScore.toFixed(1)}/100` : "Awaiting face";
     }
     if (summarySelectors.overall_score_badge) {
-        summarySelectors.overall_score_badge.textContent = `${overallScore.toFixed(1)}/100`;
+        summarySelectors.overall_score_badge.textContent = hasFace ? `${overallScore.toFixed(1)}/100` : "Awaiting face";
     }
     updateDrowsinessBadge(drowsinessState);
     if (scoreHistory.length > 60) scoreHistory.shift();
-    scoreHistory.push(overallScore);
+    if (hasFace) scoreHistory.push(overallScore);
     renderSparkline(scoreHistory);
     if (summarySelectors.score_badges) {
-        const badges = [
+        const badges = hasFace ? [
             { label: `Attention`, value: attentionScore, css: getScoreBadgeClass(attentionScore) },
             { label: `Eyes`, value: eyeScore, css: getScoreBadgeClass(eyeScore) },
             { label: `Posture`, value: postureScore, css: getScoreBadgeClass(postureScore) },
             { label: `Fatigue`, value: fatigueScore, css: getScoreBadgeClass(100 - fatigueScore) },
-        ];
+        ] : [];
         summarySelectors.score_badges.innerHTML = badges
             .map(
                 (badge) => `
@@ -841,16 +850,16 @@ function renderFaceDetails(payload) {
                     </span>
                 `,
             )
-            .join("");
+            .join("") || '<span class="score-badge neutral">Scores appear after face detection</span>';
     }
     if (summarySelectors.confidence_bar) {
-        summarySelectors.confidence_bar.style.width = `${confidencePercent}%`;
+        summarySelectors.confidence_bar.style.width = `${hasFace ? confidencePercent : 0}%`;
     }
     if (summarySelectors.face_recommendation) {
         summarySelectors.face_recommendation.textContent =
             detail.recommendation ||
-            (detail.analysis_mode === "basic-fallback"
-                ? "Basic fatigue estimate is active. For detailed eye and fatigue cues, the server needs MediaPipe face and pose analysis available."
+            (["basic-fallback", "face-detection-fallback"].includes(detail.analysis_mode)
+                ? "A basic fatigue estimate is active. Improve lighting and face the camera for detailed eye cues."
                 : "Adjust lighting and keep each face fully in frame so the analysis can read the eyes, posture, and fatigue risk.");
     }
 }

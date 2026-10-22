@@ -1,4 +1,4 @@
-const CACHE_NAME = "classpulse-shell-v5";
+const CACHE_NAME = "classpulse-shell-v6";
 const APP_SHELL = ["/login", "/static/dashboard.css", "/static/dashboard.js", "/static/theme.js"];
 
 self.addEventListener("install", (event) => {

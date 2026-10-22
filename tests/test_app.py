@@ -330,6 +330,50 @@ def test_multi_face_scan_returns_scores_without_starting_single_person_pose(monk
     assert result["overall_score"] > 0
 
 
+def test_face_detection_fallback_returns_face_and_explains_estimate(monkeypatch):
+    class MissedMesh:
+        def __init__(self, **_kwargs):
+            pass
+
+        def process(self, _image):
+            return SimpleNamespace(multi_face_landmarks=None)
+
+        def close(self):
+            pass
+
+    detection = SimpleNamespace(
+        location_data=SimpleNamespace(relative_bounding_box=SimpleNamespace(xmin=.25, ymin=.2, width=.4, height=.5)),
+        score=[.81],
+    )
+
+    class FaceDetector:
+        def __init__(self, **_kwargs):
+            pass
+
+        def process(self, _image):
+            return SimpleNamespace(detections=[detection])
+
+        def close(self):
+            pass
+
+    fake_mp = SimpleNamespace(solutions=SimpleNamespace(
+        face_mesh=SimpleNamespace(FaceMesh=MissedMesh),
+        pose=SimpleNamespace(Pose=lambda **_kwargs: None),
+        face_detection=SimpleNamespace(FaceDetection=FaceDetector),
+    ))
+    monkeypatch.setattr(backend, "mp", fake_mp)
+    monkeypatch.setattr(backend, "detect_phones", lambda _frame, confidence=0.2: ([], "ready"))
+
+    result = backend.analyze_camera_frame(np.zeros((240, 320, 3), dtype=np.uint8))
+
+    assert result["face_detected"] is True
+    assert result["analysis_mode"] == "face-detection-fallback"
+    assert result["attention"] > 0
+    assert result["fatigue_index"] > 0
+    assert result["overall_score"] > 0
+    assert result["recommendation"]
+
+
 def test_phone_detector_uses_recall_friendly_model_settings(monkeypatch):
     from classpulse import phone_detection
 

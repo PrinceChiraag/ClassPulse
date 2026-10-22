@@ -232,7 +232,7 @@ def analyze_camera_frame(frame, detection_mode="multi-face", detection_settings=
             static_image_mode=False,
             max_num_faces=max_faces,
             refine_landmarks=True,
-            min_detection_confidence=0.5,
+            min_detection_confidence=0.35,
             min_tracking_confidence=0.5,
         )
         # Pose is a single-person model. Skip it entirely in classroom mode;
@@ -259,7 +259,52 @@ def analyze_camera_frame(frame, detection_mode="multi-face", detection_settings=
         face_result = face_mesh.process(rgb)
 
         face_entries = []
-        if face_result.multi_face_landmarks:
+        detected_faces = getattr(face_result, "multi_face_landmarks", None) or []
+        if not detected_faces:
+            # Face Detection uses a dedicated detector and can recover faces
+            # that the landmark tracker misses in a first or low-light frame.
+            detector = None
+            try:
+                detector = mp.solutions.face_detection.FaceDetection(
+                    model_selection=1 if max(frame.shape[:2]) > 640 else 0,
+                    min_detection_confidence=0.35,
+                )
+                detection_result = detector.process(rgb)
+                for detection in getattr(detection_result, "detections", None) or []:
+                    relative = detection.location_data.relative_bounding_box
+                    x0 = max(0, int(relative.xmin * frame.shape[1]))
+                    y0 = max(0, int(relative.ymin * frame.shape[0]))
+                    x1 = min(frame.shape[1], int((relative.xmin + relative.width) * frame.shape[1]))
+                    y1 = min(frame.shape[0], int((relative.ymin + relative.height) * frame.shape[0]))
+                    if x1 <= x0 or y1 <= y0:
+                        continue
+                    confidence = float(detection.score[0])
+                    eye_engagement = max(0.0, min(1.0, confidence * 0.8))
+                    attention = round(confidence * 100, 1)
+                    fatigue = round(max(0.0, min(1.0, 1.0 - confidence)), 3)
+                    face_entries.append({
+                        "attention": attention, "fatigue": fatigue,
+                        "fatigue_index": round(fatigue * 100, 1),
+                        "eye_engagement": eye_engagement, "posture_score": 0.7,
+                        "drowsiness_state": "Needs clearer face landmarks",
+                        "microsleep": False, "yawning": False,
+                        "label": f"Student {len(face_entries) + 1}",
+                        "face_index": len(face_entries),
+                        "confidence": round(confidence * 100, 1),
+                        "overall_score": round((attention * .55) + (70 * .25) + (eye_engagement * 100 * .2), 1),
+                        "bbox": {"x": x0, "y": y0, "width": x1 - x0, "height": y1 - y0},
+                        "analysis_mode": "face-detection-fallback",
+                    })
+            except Exception:
+                logger.exception("Dedicated face detection fallback failed")
+            finally:
+                if detector is not None:
+                    try:
+                        detector.close()
+                    except Exception:
+                        logger.exception("Failed to close face detector")
+
+        if detected_faces:
             timestamp = time.monotonic()
             with _scan_tracks_lock:
                 tracks = _scan_tracks.setdefault(str(scan_session), [])
@@ -269,7 +314,7 @@ def analyze_camera_frame(frame, detection_mode="multi-face", detection_settings=
                     for key in oldest:
                         _scan_tracks.pop(key, None)
                 used_tracks = set()
-                for index, face in enumerate(face_result.multi_face_landmarks[:max_faces]):
+                for index, face in enumerate(detected_faces[:max_faces]):
                     bbox = _face_bbox(face.landmark, frame.shape[1], frame.shape[0])
                     center = ((bbox["x"] + bbox["width"] / 2) / frame.shape[1], (bbox["y"] + bbox["height"] / 2) / frame.shape[0])
                     candidates = [(i, track) for i, track in enumerate(tracks) if i not in used_tracks and ((track["center"][0] - center[0]) ** 2 + (track["center"][1] - center[1]) ** 2) ** .5 < .16]
@@ -301,7 +346,14 @@ def analyze_camera_frame(frame, detection_mode="multi-face", detection_settings=
                     face_entries.append(metrics)
 
         if face_entries:
-            return _add_phone_scan(_aggregate_face_scan(face_entries), frame, settings)
+            if face_entries[0].get("analysis_mode") == "face-detection-fallback":
+                summary = build_face_summary({
+                    **face_entries[0], "face_detected": True, "face_count": len(face_entries),
+                    "faces": face_entries, "analysis_mode": "face-detection-fallback",
+                })
+                return _add_phone_scan(summary, frame, settings)
+            result = _aggregate_face_scan(face_entries)
+            return _add_phone_scan(result, frame, settings)
         return _add_phone_scan(build_face_summary(_fallback_face_metrics(frame)), frame, settings)
     except Exception:
         logger.exception("MediaPipe face/fatigue analysis failed; using basic fallback")
@@ -500,6 +552,8 @@ def create_app():
             "service": "ClassPulse",
             "version": "1.0.0",
             "phone_detector": phone_detector_runtime_status(),
+            "face_detector": "ready" if mp is not None and hasattr(mp, "solutions") else "fallback",
+            "fatigue_metrics": "ready" if mp is not None and hasattr(mp, "solutions") else "basic-estimate",
         })
 
     @app.post("/api/auth/register")
