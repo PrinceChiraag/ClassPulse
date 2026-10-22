@@ -316,6 +316,30 @@
         }
         .demo-card { background: #f7f1e7; }
         .error { color: #9c3939; background: #fff1ef; border-color: #f1d5d0; }
+        .form-note { margin: -8px 0 0; color: #76887f; font-size: .78rem; line-height: 1.5; }
+        .auth-form button { min-height: 48px; }
+        @media (max-width: 600px) {
+            body { display: block; min-height: 100svh; padding: 68px 12px 16px; }
+            .login-theme-toggle { top: 12px; right: 12px; }
+            .auth-shell { width: 100%; border-radius: 20px; }
+            .hero { padding: 21px 18px; }
+            .brand { margin-bottom: 18px; }
+            .brand-mark { width: 44px; height: 44px; }
+            .hero-copy h2 { font-size: 1.8rem; }
+            .hero-copy p { font-size: .9rem; line-height: 1.55; }
+            .feature-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 7px; margin-top: 16px; }
+            .feature { padding: 10px 8px; border-radius: 12px; }
+            .feature strong { margin-bottom: 4px; font-size: .9rem; }
+            .feature span { font-size: .68rem; }
+            .demo-card { font-size: .78rem; }
+            .panel { padding: 16px 12px; }
+            .auth-stack { gap: 12px; }
+            .auth-form { gap: 12px; padding: 16px 13px; border-radius: 15px; }
+            input { min-height: 48px; }
+        }
+        @media (max-width: 360px) {
+            .feature-grid { grid-template-columns: 1fr; }
+        }
         .login-theme-toggle {
             position: fixed; z-index: 5; top: 18px; right: 18px; width: auto;
             padding: 10px 14px; border: 1px solid #e0d6c7; border-radius: 999px;
@@ -331,6 +355,26 @@
         :root[data-theme="dark"] input { color: #eee9dd; background: #20241e; border-color: #41473b; }
         :root[data-theme="dark"] .demo-card { color: #c9c1b1; background: #2d3327; }
         :root[data-theme="dark"] .login-theme-toggle { color: #e1dac9; background: #2b3027; border-color: #444a3e; }
+        @media (max-width: 600px) {
+            body { display: block; min-height: 100svh; padding: 68px 12px 16px; }
+            .login-theme-toggle { top: 12px; right: 12px; }
+            .auth-shell { width: 100%; border-radius: 20px; }
+            .hero { padding: 21px 18px; }
+            .brand { margin-bottom: 18px; }
+            .brand-mark { width: 44px; height: 44px; }
+            .hero-copy h2 { font-size: 1.8rem; }
+            .hero-copy p { font-size: .9rem; line-height: 1.55; }
+            .feature-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 7px; margin-top: 16px; }
+            .feature { padding: 10px 8px; border-radius: 12px; }
+            .feature strong { margin-bottom: 4px; font-size: .9rem; }
+            .feature span { font-size: .68rem; }
+            .demo-card { font-size: .78rem; }
+            .panel { padding: 16px 12px; }
+            .auth-stack { gap: 12px; }
+            .auth-form { gap: 12px; padding: 16px 13px; border-radius: 15px; }
+            input { min-height: 48px; }
+        }
+        @media (max-width: 360px) { .feature-grid { grid-template-columns: 1fr; } }
     </style>
 </head>
 <body>
@@ -385,9 +429,10 @@
             <div class="auth-stack">
                 <form method="POST" action="/api/auth/login" class="auth-form">
                     <h2>Login</h2>
+                    <p class="form-note">Sign in with the email address or username you registered.</p>
                     <label>
-                        Email address
-                        <input type="email" name="email" placeholder="teacher@classpulse.com" autocomplete="email" required />
+                        Email or username
+                        <input type="text" name="identifier" placeholder="you@school.edu or yourname" autocomplete="username" autocapitalize="none" spellcheck="false" required />
                     </label>
 
                     <label>
@@ -404,6 +449,12 @@
                         Teacher name
                         <input type="text" name="name" placeholder="Enter full name" autocomplete="name" required />
                     </label>
+
+                    <label>
+                        Username
+                        <input type="text" name="username" placeholder="e.g. alex.chen" autocomplete="username" autocapitalize="none" minlength="3" maxlength="30" pattern="[A-Za-z0-9_.-]{3,30}" title="Use 3–30 letters, numbers, dots, dashes, or underscores" required />
+                    </label>
+                    <p class="form-note">You can use this username or your email to sign in.</p>
 
                     <label>
                         Email address

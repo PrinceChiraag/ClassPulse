@@ -4,7 +4,7 @@ The web dashboard uses the same versioned HTTP API intended for a future Android
 
 ## Authentication
 
-1. `POST /api/v1/auth/login` with `{"email":"...","password":"..."}`.
+1. `POST /api/v1/auth/login` with `{"identifier":"email-or-username","password":"..."}`. For compatibility, `email` or `username` can also be supplied instead of `identifier`.
 2. Keep the returned `access_token` in the platform's secure credential store.
 3. Send `Authorization: Bearer <access_token>` on every other `/api/v1` request.
 4. Tokens expire after 12 hours. The logout endpoint is stateless; delete the token from secure storage. Sign in again for a new token.

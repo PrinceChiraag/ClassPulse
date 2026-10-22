@@ -8,6 +8,7 @@ services:
       SECRET_KEY: ${SECRET_KEY:?Set SECRET_KEY in .env}
       TRUST_PROXY: "1"
       CLASSPULSE_DB_PATH: /data/classpulse.db
+      DATABASE_URL: ${DATABASE_URL:-}
       CLASSPULSE_PHONE_MODEL: /app/yolo11n.pt
       FLASK_DEBUG: "0"
     ports:

@@ -2,6 +2,7 @@ import re
 import sqlite3
 import threading
 import time
+import os
 from collections import defaultdict, deque
 from pathlib import Path
 from typing import Dict, List, Optional
@@ -10,73 +11,129 @@ from werkzeug.security import check_password_hash, generate_password_hash
 
 
 EMAIL_PATTERN = re.compile(r"^[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+$")
+USERNAME_PATTERN = re.compile(r"^[A-Za-z0-9_.-]{3,30}$")
 
 
 def validate_email(email: str) -> bool:
     return bool(email) and bool(EMAIL_PATTERN.fullmatch(email.strip()))
 
 
+def validate_username(username: str) -> bool:
+    return bool(username) and bool(USERNAME_PATTERN.fullmatch(username.strip()))
+
+
+class _PostgresConnection:
+    """Small DB-API adapter so existing parameterized queries work on both backends."""
+
+    def __init__(self, connection):
+        self.connection = connection
+
+    def execute(self, query, parameters=()):
+        return self.connection.execute(query.replace("?", "%s"), parameters)
+
+    def __enter__(self):
+        self.connection.__enter__()
+        return self
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        return self.connection.__exit__(exc_type, exc_value, traceback)
+
+
+class _SQLiteConnection:
+    """Close SQLite handles after transactions instead of retaining file locks."""
+
+    def __init__(self, connection):
+        self.connection = connection
+
+    def execute(self, query, parameters=()):
+        return self.connection.execute(query, parameters)
+
+    def __enter__(self):
+        self.connection.__enter__()
+        return self
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        try:
+            return self.connection.__exit__(exc_type, exc_value, traceback)
+        finally:
+            self.connection.close()
+
+
 class TeacherStore:
     def __init__(self, db_path: str | Path = Path(__file__).resolve().parent / "data" / "classpulse.db"):
-        self.db_path = Path(db_path)
-        self.db_path.parent.mkdir(parents=True, exist_ok=True)
+        database_url = os.getenv("DATABASE_URL", "").strip()
+        if database_url.startswith("postgres://"):
+            database_url = database_url.replace("postgres://", "postgresql://", 1)
+        if database_url.startswith("postgresql+psycopg://"):
+            database_url = database_url.replace("postgresql+psycopg://", "postgresql://", 1)
+        self.database_url = database_url
+        self.use_postgres = self.database_url.startswith(("postgresql://", "postgresql+"))
+        self.database_backend = "postgresql" if self.use_postgres else "sqlite"
+        self.db_path = Path(db_path) if not self.use_postgres else None
+        if not self.use_postgres:
+            self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self.init_db()
 
     def _connect(self) -> sqlite3.Connection:
+        if self.use_postgres:
+            import psycopg
+            from psycopg.rows import dict_row
+
+            return _PostgresConnection(psycopg.connect(self.database_url, row_factory=dict_row))
         connection = sqlite3.connect(self.db_path)
         connection.row_factory = sqlite3.Row
         connection.execute("PRAGMA foreign_keys = ON")
-        return connection
+        return _SQLiteConnection(connection)
 
     def init_db(self) -> None:
+        id_type = "BIGSERIAL PRIMARY KEY" if self.use_postgres else "INTEGER PRIMARY KEY AUTOINCREMENT"
+        ref_type = "BIGINT" if self.use_postgres else "INTEGER"
+        blob_type = "BYTEA" if self.use_postgres else "BLOB"
+        text_now = "(CURRENT_TIMESTAMP::text)" if self.use_postgres else "CURRENT_TIMESTAMP"
         with self._connect() as connection:
             connection.execute(
-                """
+                f"""
                 CREATE TABLE IF NOT EXISTS teachers (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    id {id_type},
                     name TEXT NOT NULL,
+                    username TEXT NOT NULL,
                     email TEXT NOT NULL UNIQUE,
                     password_hash TEXT NOT NULL,
                     department TEXT,
-                    created_at TEXT DEFAULT CURRENT_TIMESTAMP
+                    created_at TEXT DEFAULT {text_now}
                 )
                 """
             )
             connection.execute(
-                """
+                f"""
                 CREATE TABLE IF NOT EXISTS scan_history (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    teacher_id INTEGER,
-                    attention REAL,
-                    fatigue REAL,
-                    posture_score REAL,
-                    timestamp TEXT,
-                    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                    id {id_type}, teacher_id {ref_type}, attention REAL, fatigue REAL,
+                    posture_score REAL, timestamp TEXT, created_at TEXT DEFAULT {text_now},
                     FOREIGN KEY(teacher_id) REFERENCES teachers(id)
                 )
                 """
             )
             connection.execute(
-                """
+                f"""
                 CREATE TABLE IF NOT EXISTS students (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    teacher_id INTEGER NOT NULL,
+                    id {id_type},
+                    teacher_id {ref_type} NOT NULL,
                     full_name TEXT NOT NULL,
                     class_name TEXT NOT NULL,
                     roll_number TEXT NOT NULL,
-                    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                    created_at TEXT DEFAULT {text_now},
                     UNIQUE(teacher_id, class_name, roll_number),
                     FOREIGN KEY(teacher_id) REFERENCES teachers(id)
                 )
                 """
             )
             connection.execute(
-                """
+                f"""
                 CREATE TABLE IF NOT EXISTS student_scans (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    teacher_id INTEGER NOT NULL,
-                    student_id INTEGER NOT NULL,
-                    image_data BLOB NOT NULL,
+                    id {id_type},
+                    teacher_id {ref_type} NOT NULL,
+                    student_id {ref_type} NOT NULL,
+                    image_data {blob_type} NOT NULL,
                     image_mime TEXT NOT NULL DEFAULT 'image/jpeg',
                     attention REAL NOT NULL,
                     fatigue REAL NOT NULL,
@@ -84,22 +141,41 @@ class TeacherStore:
                     confidence REAL NOT NULL,
                     fatigue_level TEXT NOT NULL,
                     timestamp TEXT NOT NULL,
-                    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                    created_at TEXT DEFAULT {text_now},
                     FOREIGN KEY(teacher_id) REFERENCES teachers(id),
                     FOREIGN KEY(student_id) REFERENCES students(id)
                 )
                 """
             )
+            # Migrate existing SQLite/PostgreSQL installations without
+            # invalidating accounts created before username sign-in.
+            if self.use_postgres:
+                connection.execute("ALTER TABLE teachers ADD COLUMN IF NOT EXISTS username TEXT")
+                connection.execute("UPDATE teachers SET username = 'teacher' || id::text WHERE username IS NULL OR username = ''")
+                connection.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_teachers_username_ci ON teachers (LOWER(username))")
+                connection.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_teachers_email_ci ON teachers (LOWER(email))")
+            else:
+                columns = {row["name"] for row in connection.execute("PRAGMA table_info(teachers)").fetchall()}
+                if "username" not in columns:
+                    connection.execute("ALTER TABLE teachers ADD COLUMN username TEXT")
+                connection.execute("UPDATE teachers SET username = 'teacher' || id WHERE username IS NULL OR username = ''")
+                connection.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_teachers_username_ci ON teachers (username COLLATE NOCASE)")
+                connection.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_teachers_email_ci ON teachers (email COLLATE NOCASE)")
             connection.execute(
-                "INSERT OR IGNORE INTO teachers (id, name, email, password_hash, department) VALUES (?, ?, ?, ?, ?)",
+                "INSERT INTO teachers (id, name, username, email, password_hash, department) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT DO NOTHING",
                 (
                     1,
                     "Demo Teacher",
+                    "demoteacher",
                     "teacher@classpulse.com",
                     generate_password_hash("Teacher@123"),
                     "Administration",
                 ),
             )
+            if self.use_postgres:
+                connection.execute(
+                    "SELECT setval(pg_get_serial_sequence('teachers', 'id'), GREATEST(COALESCE((SELECT MAX(id) FROM teachers), 1), 1), true)"
+                )
 
     def remove_demo_teacher(self) -> None:
         with self._connect() as connection:
@@ -115,43 +191,51 @@ class TeacherStore:
         return {
             "id": row["id"],
             "name": row["name"],
+            "username": row["username"],
             "email": row["email"],
             "department": row["department"],
             "created_at": row["created_at"],
         }
 
-    def register_teacher(self, name: str, email: str, password: str, department: str = "") -> Optional[Dict]:
+    def register_teacher(self, name: str, username: str, email: str, password: str, department: str = "") -> Optional[Dict]:
         clean_name = (name or "").strip()
+        clean_username = (username or "").strip().lower()
         clean_email = (email or "").strip().lower()
-        if not clean_name or not clean_email or not password:
+        if not clean_name or not clean_username or not clean_email or not password:
             return None
-        if not validate_email(clean_email):
+        if not validate_email(clean_email) or not validate_username(clean_username):
             return None
         if len(password) < 8:
             return None
 
         with self._connect() as connection:
             existing = connection.execute(
-                "SELECT id FROM teachers WHERE email = ?",
-                (clean_email,),
+                "SELECT id FROM teachers WHERE lower(email) = ? OR lower(username) = ?",
+                (clean_email, clean_username),
             ).fetchone()
             if existing is not None:
                 return None
 
             cursor = connection.execute(
-                "INSERT INTO teachers (name, email, password_hash, department) VALUES (?, ?, ?, ?)",
-                (clean_name, clean_email, generate_password_hash(password), department.strip()),
+                "INSERT INTO teachers (name, username, email, password_hash, department) VALUES (?, ?, ?, ?, ?) ON CONFLICT DO NOTHING RETURNING id",
+                (clean_name, clean_username, clean_email, generate_password_hash(password), department.strip()),
             )
-            teacher_id = cursor.lastrowid
+            inserted = cursor.fetchone()
+            if inserted is None:
+                return None
+            teacher_id = inserted["id"]
 
         return self.get_teacher_by_id(teacher_id)
 
-    def authenticate_teacher(self, email: str, password: str) -> Optional[Dict]:
-        clean_email = (email or "").strip().lower()
+    def authenticate_teacher(self, identifier: str, password: str) -> Optional[Dict]:
+        clean_identifier = (identifier or "").strip().lower()
+        if not clean_identifier or not password:
+            return None
+        field = "email" if "@" in clean_identifier else "username"
         with self._connect() as connection:
             row = connection.execute(
-                "SELECT * FROM teachers WHERE email = ?",
-                (clean_email,),
+                f"SELECT * FROM teachers WHERE lower({field}) = ?",
+                (clean_identifier,),
             ).fetchone()
             if row is None:
                 return None
@@ -206,11 +290,12 @@ class TeacherStore:
             cursor = connection.execute(
                 """INSERT INTO student_scans
                 (teacher_id, student_id, image_data, image_mime, attention, fatigue, posture_score, confidence, fatigue_level, timestamp)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                (teacher_id, student_row["id"], sqlite3.Binary(image_data), image_mime, float(metrics.get("attention", 0)), fatigue,
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id""",
+                (teacher_id, student_row["id"], bytes(image_data), image_mime, float(metrics.get("attention", 0)), fatigue,
                  float(metrics.get("posture_score", 0)), float(metrics.get("confidence", 0)), fatigue_level, timestamp),
             )
-            return {"id": cursor.lastrowid, "student_id": student_row["id"], "name": name,
+            scan_id = cursor.fetchone()["id"]
+            return {"id": scan_id, "student_id": student_row["id"], "name": name,
                     "class_name": class_name, "roll_number": roll_number, "fatigue_level": fatigue_level,
                     "fatigue": fatigue, "attention": float(metrics.get("attention", 0)), "timestamp": timestamp}
 

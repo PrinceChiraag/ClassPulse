@@ -1,5 +1,7 @@
 import base64
+import sqlite3
 import uuid
+from pathlib import Path
 
 import cv2
 import numpy as np
@@ -8,6 +10,8 @@ from types import SimpleNamespace
 from app import app
 from classpulse import backend
 from classpulse.metrics import LEFT_EYE, RIGHT_EYE
+from classpulse.store import TeacherStore
+from werkzeug.security import generate_password_hash
 
 
 def authenticated_client():
@@ -17,6 +21,7 @@ def authenticated_client():
         "/api/auth/register",
         json={
             "name": "Test Teacher",
+            "username": f"teacher-test-{uuid.uuid4().hex[:10]}",
             "email": email,
             "password": "secret123",
             "department": "Testing",
@@ -53,6 +58,7 @@ def test_dashboard_template_renders_student_controls():
         "/api/auth/register",
         json={
             "name": "Teacher Dashboard",
+            "username": f"teacher-dash-{uuid.uuid4().hex[:10]}",
             "email": email,
             "password": "secret123",
             "department": "Math",
@@ -76,6 +82,7 @@ def test_camera_page_explains_browser_camera_permissions():
         "/api/auth/register",
         json={
             "name": "Teacher Camera",
+            "username": f"teacher-cam-{uuid.uuid4().hex[:10]}",
             "email": email,
             "password": "secret123",
             "department": "English",
@@ -100,6 +107,8 @@ def test_login_page_exposes_teacher_registration_form():
     assert "register as teacher" in html
     assert "create account" in html
     assert "teacher name" in html
+    assert 'name="username"' in html
+    assert "email or username" in html
 
 
 def test_dashboard_config_includes_camera_and_threshold_controls():
@@ -126,6 +135,7 @@ def test_settings_page_exposes_detection_mode_and_threshold_controls():
         "/api/auth/register",
         json={
             "name": "Teacher Settings",
+            "username": f"teacher-set-{uuid.uuid4().hex[:10]}",
             "email": email,
             "password": "secret123",
             "department": "CS",
@@ -150,6 +160,7 @@ def test_dashboard_does_not_render_saved_records_and_uses_live_session_tools():
         "/api/auth/register",
         json={
             "name": "Teacher Live",
+            "username": f"teacher-live-{uuid.uuid4().hex[:10]}",
             "email": email,
             "password": "secret123",
             "department": "AI",
@@ -183,6 +194,7 @@ def test_registration_rejects_invalid_email_and_short_password():
         "/api/auth/register",
         json={
             "name": "Teacher Invalid",
+            "username": "invalid-user",
             "email": "not-an-email",
             "password": "short",
             "department": "Math",
@@ -197,6 +209,7 @@ def test_registration_rejects_invalid_email_and_short_password():
         "/api/auth/register",
         json={
             "name": "Teacher Weak",
+            "username": "weak-user",
             "email": "weak@example.com",
             "password": "short",
             "department": "Math",
@@ -219,6 +232,7 @@ def test_security_headers_are_present_on_responses():
     assert "frame-ancestors" in response.headers.get("Content-Security-Policy", "")
     assert "camera=(self)" in response.headers.get("Permissions-Policy", "")
     assert "media-src" in response.headers.get("Content-Security-Policy", "")
+    assert response.get_json()["database"] in {"sqlite", "postgresql"}
 
 
 def test_student_snapshot_endpoint_returns_live_session_data_only():
@@ -423,6 +437,7 @@ def test_teacher_registration_and_login_store_details_in_db():
         "/api/auth/register",
         json={
             "name": "Ms. Parker",
+            "username": f"parker-{uuid.uuid4().hex[:10]}",
             "email": email,
             "password": "secret123",
             "department": "Science",
@@ -434,17 +449,72 @@ def test_teacher_registration_and_login_store_details_in_db():
 
     login = client.post(
         "/api/auth/login",
-        json={"email": email, "password": "secret123"},
+        json={"identifier": email, "password": "secret123"},
     )
 
     assert login.status_code == 200
     payload = login.get_json()
     assert payload["success"] is True
     assert payload["teacher"]["email"] == email
+    username = payload["teacher"]["username"]
+
+    username_login = client.post(
+        "/api/auth/login",
+        json={"identifier": username.upper(), "password": "secret123"},
+    )
+    assert username_login.status_code == 200
+    assert username_login.get_json()["teacher"]["username"] == username
+
+    mobile_login = client.post(
+        "/api/v1/auth/login",
+        json={"username": username, "password": "secret123"},
+    )
+    assert mobile_login.status_code == 200
+    assert mobile_login.get_json()["access_token"]
 
     me = client.get("/api/auth/me")
     assert me.status_code == 200
     assert me.get_json()["teacher"]["name"] == "Ms. Parker"
+
+
+def test_registration_reports_username_conflict_clearly():
+    client = app.test_client()
+    username = f"taken-{uuid.uuid4().hex[:10]}"
+    first = client.post("/api/auth/register", json={
+        "name": "First Teacher", "username": username,
+        "email": f"first-{uuid.uuid4().hex[:8]}@example.com", "password": "secret123",
+    })
+    assert first.status_code == 200
+
+    conflict = client.post("/api/auth/register", json={
+        "name": "Second Teacher", "username": username.upper(),
+        "email": f"second-{uuid.uuid4().hex[:8]}@example.com", "password": "secret123",
+    })
+    assert conflict.status_code == 409
+    assert "username" in conflict.get_json()["message"].lower()
+
+
+def test_existing_sqlite_teacher_accounts_receive_login_safe_usernames():
+    db_path = Path(__file__).resolve().parent / f"legacy-{uuid.uuid4().hex}.sqlite3"
+    connection = sqlite3.connect(db_path)
+    connection.execute("""CREATE TABLE teachers (
+        id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL,
+        email TEXT NOT NULL UNIQUE, password_hash TEXT NOT NULL,
+        department TEXT, created_at TEXT DEFAULT CURRENT_TIMESTAMP
+    )""")
+    connection.execute(
+        "INSERT INTO teachers (id, name, email, password_hash, department) VALUES (?, ?, ?, ?, ?)",
+        (7, "Legacy Teacher", "legacy@example.com", generate_password_hash("secret123"), "Science"),
+    )
+    connection.commit()
+    connection.close()
+
+    try:
+        store = TeacherStore(db_path)
+        assert store.authenticate_teacher("legacy@example.com", "secret123")["username"] == "teacher7"
+        assert store.authenticate_teacher("teacher7", "secret123")["email"] == "legacy@example.com"
+    finally:
+        db_path.unlink(missing_ok=True)
 
 
 def test_all_sidebar_pages_are_available_and_protected():
@@ -455,6 +525,7 @@ def test_all_sidebar_pages_are_available_and_protected():
         "/api/auth/register",
         json={
             "name": "Sidebar Teacher",
+            "username": f"teacher-side-{uuid.uuid4().hex[:10]}",
             "email": email,
             "password": "secret123",
             "department": "Computer Science",

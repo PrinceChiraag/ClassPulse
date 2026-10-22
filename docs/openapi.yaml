@@ -18,9 +18,15 @@ paths:
           application/json:
             schema:
               type: object
-              required: [email, password]
+              required: [password]
+              anyOf:
+                - required: [identifier]
+                - required: [email]
+                - required: [username]
               properties:
+                identifier: { type: string, description: Email address or username }
                 email: { type: string, format: email }
+                username: { type: string }
                 password: { type: string, format: password }
       responses:
         '200':

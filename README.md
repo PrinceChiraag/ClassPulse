@@ -6,11 +6,11 @@ It is a decision-support prototype, not a validated measure of learning, attenti
 
 ## Capabilities
 
-- Teacher registration and sign-in with password hashes and signed sessions.
+- Teacher registration with a unique username; sign in with username or email using password hashes and signed sessions.
 - Responsive teacher portal with camera controls, scan settings, live summaries, and light/dark themes.
 - MediaPipe face landmarks and posture cues, with an OpenCV fallback; optional Ultralytics phone-object detection.
 - Versioned bearer-token API for a future native mobile client (`docs/mobile-api.md`, `docs/openapi.yaml`).
-- SQLite teacher accounts and opt-in named scan records. Camera frames are processed in memory by default; a teacher can explicitly opt into retaining a named scan from Overview.
+- SQLite for local development or PostgreSQL for hosted deployments, with opt-in named scan records. Camera frames are processed in memory by default; a teacher can explicitly opt into retaining a named scan from Overview.
 - Security headers, bounded request size and decoded image dimensions, authenticated application APIs, and production checks for secret configuration.
 
 ## Run locally
@@ -39,7 +39,7 @@ The image bundles the provided `yolo11n.pt` weights so inference does not need a
 
 `compose.yaml` binds the app to `127.0.0.1:5000`, sets production mode, requires the secret, and persists the database in a named volume. Back up that volume and restrict access. SQLite plus in-memory scan tracking are single-instance choices; migrate the database and session/track state before using multiple replicas. Set CPU and memory limits appropriate for inference.
 
-For a managed container host, use the same image, set `APP_ENV=production`, `TRUST_PROXY=1`, `SECRET_KEY`, and `CLASSPULSE_DB_PATH=/data/classpulse.db`, and mount persistent storage at `/data`. The platform must provide HTTPS and a single trusted proxy hop. Production removes the seeded demo account. A valid secret of at least 32 characters is required at startup.
+For a managed container host, use the same image, set `APP_ENV=production`, `TRUST_PROXY=1`, `SECRET_KEY`, and `DATABASE_URL` to the private connection URL of a managed PostgreSQL database. This keeps accounts and named scans across container rebuilds and supports larger deployments. If using SQLite instead, set `CLASSPULSE_DB_PATH=/data/classpulse.db` and mount persistent storage at `/data`. The platform must provide HTTPS and a single trusted proxy hop. Production removes the seeded demo account. A valid secret of at least 32 characters is required at startup. On Render, create a PostgreSQL database and set the web service's `DATABASE_URL` environment variable to its internal URL.
 
 ## Configuration
 
@@ -51,6 +51,7 @@ Copy `.env.example` for local configuration. Common deployment settings:
 | `APP_ENV` | Set to `production` to enable secure cookies, HSTS, and demo-account removal. |
 | `TRUST_PROXY` | Set to `1` only behind one trusted TLS-terminating proxy. |
 | `CLASSPULSE_DB_PATH` | SQLite database location; mount persistent storage there. |
+| `DATABASE_URL` | Optional PostgreSQL connection URL; overrides SQLite when set. |
 | `CLASSPULSE_PHONE_MODEL` | Optional path to a compatible Ultralytics model. |
 | `FLASK_DEBUG` | Keep `0` outside local development. |
 

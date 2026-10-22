@@ -20,7 +20,7 @@ except Exception:  # pragma: no cover - fallback when dependency is unavailable
 
 from classpulse.metrics import compute_attention_fatigue
 from classpulse.phone_detection import detect_phones, phone_detector_runtime_status
-from classpulse.store import TeacherStore, TelemetryStore, validate_email
+from classpulse.store import TeacherStore, TelemetryStore, validate_email, validate_username
 
 
 EMAIL_PATTERN = re.compile(r"^[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+$")
@@ -567,6 +567,7 @@ def create_app():
             "status": "ok",
             "service": "ClassPulse",
             "version": "1.0.0",
+            "database": app.teacher_store.database_backend,
             "phone_detector": phone_detector_runtime_status(),
             "face_detector": "ready" if mp is not None and hasattr(mp, "solutions") else "fallback",
             "fatigue_metrics": "ready" if mp is not None and hasattr(mp, "solutions") else "basic-estimate",
@@ -576,14 +577,21 @@ def create_app():
     def register_teacher():
         raw = request.get_json(silent=True) or request.form or {}
         name = raw.get("name", "").strip()
+        username = raw.get("username", "").strip()
         email = raw.get("email", "").strip().lower()
         password = raw.get("password", "")
         department = raw.get("department", "").strip()
 
-        if not name or not email or not password:
+        if not name or not username or not email or not password:
             if request.is_json:
-                return jsonify({"success": False, "message": "Name, email, and password are required."}), 400
-            return render_template("login.html", error="Name, email, and password are required.")
+                return jsonify({"success": False, "message": "Name, username, email, and password are required."}), 400
+            return render_template("login.html", error="Name, username, email, and password are required.")
+
+        if len(name) > 100 or not validate_username(username):
+            message = "Username must be 3–30 characters using letters, numbers, dots, dashes, or underscores."
+            if request.is_json:
+                return jsonify({"success": False, "message": message}), 400
+            return render_template("login.html", error=message)
 
         if not validate_email(email):
             if request.is_json:
@@ -595,11 +603,12 @@ def create_app():
                 return jsonify({"success": False, "message": "Password must be at least 8 characters long."}), 400
             return render_template("login.html", error="Password must be at least 8 characters long.")
 
-        teacher = app.teacher_store.register_teacher(name, email, password, department)
+        teacher = app.teacher_store.register_teacher(name, username, email, password, department)
         if teacher is None:
+            message = "That email or username is already registered. Try signing in, or choose a different username."
             if request.is_json:
-                return jsonify({"success": False, "message": "Teacher already exists or the details are invalid."}), 409
-            return render_template("login.html", error="Teacher already exists or the details are invalid.")
+                return jsonify({"success": False, "message": message}), 409
+            return render_template("login.html", error=message)
 
         session.clear()
         session["teacher_id"] = teacher["id"]
@@ -610,26 +619,20 @@ def create_app():
     @app.post("/api/auth/login")
     def login_teacher():
         raw = request.get_json(silent=True) or request.form or {}
-        email = raw.get("email", "").strip().lower()
+        identifier = str(raw.get("identifier", raw.get("email", raw.get("username", "")))).strip()
         password = raw.get("password", "")
 
-        if not email or not password:
+        if not identifier or not password:
             if request.is_json:
-                return jsonify({"success": False, "message": "Email and password are required."}), 400
-            return render_template("login.html", error="Email and password are required.")
+                return jsonify({"success": False, "message": "Email or username and password are required."}), 400
+            return render_template("login.html", error="Email or username and password are required.")
 
-        if not validate_email(email):
-            if request.is_json:
-                return jsonify({"success": False, "message": "A valid email address is required."}), 400
-            return render_template("login.html", error="A valid email address is required.")
-
-        teacher = app.teacher_store.authenticate_teacher(email, password)
+        teacher = app.teacher_store.authenticate_teacher(identifier, password)
         if teacher is None:
             if request.is_json:
-                return jsonify({"success": False, "message": "Invalid email or password."}), 401
-            return render_template("login.html", error="Invalid email or password.")
+                return jsonify({"success": False, "message": "Invalid email/username or password."}), 401
+            return render_template("login.html", error="We couldn't match that email/username and password. Check them and try again.")
 
-        session.clear()
         session.clear()
         session["teacher_id"] = teacher["id"]
         if request.is_json:
@@ -639,13 +642,13 @@ def create_app():
     @app.post("/api/v1/auth/login")
     def mobile_login_teacher():
         payload = request.get_json(silent=True) or {}
-        email = str(payload.get("email", "")).strip().lower()
+        identifier = str(payload.get("identifier", payload.get("email", payload.get("username", "")))).strip()
         password = payload.get("password", "")
-        if not email or not password:
-            return jsonify({"success": False, "error": "validation_error", "message": "Email and password are required."}), 400
-        teacher = app.teacher_store.authenticate_teacher(email, password)
+        if not identifier or not password:
+            return jsonify({"success": False, "error": "validation_error", "message": "Email or username and password are required."}), 400
+        teacher = app.teacher_store.authenticate_teacher(identifier, password)
         if teacher is None:
-            return jsonify({"success": False, "error": "invalid_credentials", "message": "Invalid email or password."}), 401
+            return jsonify({"success": False, "error": "invalid_credentials", "message": "Invalid email/username or password."}), 401
         token = mobile_token_signer.dumps({
             "teacher_id": int(teacher["id"]),
             "scan_session": secrets.token_urlsafe(16),
