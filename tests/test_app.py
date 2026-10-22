@@ -416,7 +416,7 @@ def test_phone_detector_uses_recall_friendly_model_settings(monkeypatch):
     assert captured["imgsz"] == 640
 
 
-def test_phone_detector_rechecks_large_phone_free_frames_in_overlapping_tiles(monkeypatch):
+def test_phone_detector_uses_a_single_inference_for_fast_large_frame_scans(monkeypatch):
     from classpulse import phone_detection
 
     calls = []
@@ -433,9 +433,23 @@ def test_phone_detector_rechecks_large_phone_free_frames_in_overlapping_tiles(mo
 
     assert status == "ready"
     assert detections == []
-    assert len(calls) > 1
-    assert len(set(calls[1:])) > 1
-    assert all(shape[0] < 720 and shape[1] < 1280 for shape in calls[1:])
+    assert len(calls) == 1
+    assert calls[0] == (720, 1280)
+
+
+def test_phone_detection_failure_does_not_fail_face_scan(monkeypatch):
+    monkeypatch.setattr(backend, "mp", None)
+    monkeypatch.setattr(backend, "detect_phones", lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("model failed")))
+    ok, encoded = cv2.imencode(".jpg", np.zeros((480, 640, 3), dtype=np.uint8))
+    assert ok
+    image_data = "data:image/jpeg;base64," + base64.b64encode(encoded.tobytes()).decode("ascii")
+    response = authenticated_client().post("/api/scan", json={"image_data": image_data})
+
+    assert response.status_code == 200
+    result = response.get_json()
+    assert "attention" in result
+    assert "overall_score" in result
+    assert result["phone_detection_status"] == "error"
 
 
 def test_analyze_camera_frame_falls_back_when_mediapipe_is_unavailable():
@@ -497,6 +511,19 @@ def test_teacher_registration_and_login_store_details_in_db():
     me = client.get("/api/auth/me")
     assert me.status_code == 200
     assert me.get_json()["teacher"]["name"] == "Ms. Parker"
+
+
+def test_login_reports_database_unavailable_separately_from_bad_password(monkeypatch):
+    client = app.test_client()
+
+    def unavailable(*_args, **_kwargs):
+        raise RuntimeError("database connection refused")
+
+    monkeypatch.setattr(app.teacher_store, "authenticate_teacher", unavailable)
+    response = client.post("/api/auth/login", json={"identifier": "teacher@example.com", "password": "secret123"})
+
+    assert response.status_code == 503
+    assert response.get_json()["error"] == "account_store_unavailable"
 
 
 def test_registration_reports_username_conflict_clearly():

@@ -90,35 +90,16 @@ def detect_phones(frame, confidence=0.12):
                 detections = _fallback_phone_scan(frame)
                 return detections, "fallback" if detections else "no-phone-class"
         # Ultralytics models are shared by threaded Flask requests; serialize inference.
-        height, width = frame.shape[:2]
         with _model_lock:
-            # Full-frame inference finds ordinary phones. If it finds none,
-            # inspect overlapping halves to give small/partly visible phones
-            # more pixels without multiplying work on already-positive scans.
+            # One bounded pass keeps the on-demand scan quick and avoids a
+            # sequence of extra model allocations on memory-limited hosts.
             result = model.predict(frame, classes=class_ids, conf=float(confidence), imgsz=640, verbose=False)[0]
-            detections = _read_result(result)
-            if not detections and max(height, width) >= 720:
-                for x1, y1, x2, y2 in _overlapping_tiles(width, height):
-                    tile_result = model.predict(
-                        frame[y1:y2, x1:x2], classes=class_ids,
-                        conf=float(confidence), imgsz=640, verbose=False,
-                    )[0]
-                    detections.extend(_read_result(tile_result, x1, y1))
-        detections = _deduplicate(detections)
+        detections = _read_result(result)
         return detections, "ready"
     except Exception as exc:
         logger.exception("Phone detection inference failed")
         detections = _fallback_phone_scan(frame)
         return detections, "fallback" if detections else "error"
-
-
-def _overlapping_tiles(width, height):
-    """Split the frame into four overlapping views, retaining edge coverage."""
-    tile_w, tile_h = (width + 1) // 2, (height + 1) // 2
-    overlap_x, overlap_y = max(1, width // 12), max(1, height // 12)
-    xs = sorted({0, max(0, width - tile_w), min(width - tile_w, tile_w - overlap_x)})
-    ys = sorted({0, max(0, height - tile_h), min(height - tile_h, tile_h - overlap_y)})
-    return [(x, y, min(width, x + tile_w + overlap_x), min(height, y + tile_h + overlap_y)) for y in ys for x in xs]
 
 
 def _read_result(result, offset_x=0, offset_y=0):
@@ -133,25 +114,6 @@ def _read_result(result, offset_x=0, offset_y=0):
                          "width": max(1, x2 - x1), "height": max(1, y2 - y1)},
             })
     return detections
-
-
-def _deduplicate(detections):
-    kept = []
-    for item in sorted(detections, key=lambda row: row["confidence"], reverse=True):
-        a = item["bbox"]
-        duplicate = False
-        for existing in kept:
-            b = existing["bbox"]
-            ix1, iy1 = max(a["x"], b["x"]), max(a["y"], b["y"])
-            ix2, iy2 = min(a["x"] + a["width"], b["x"] + b["width"]), min(a["y"] + a["height"], b["y"] + b["height"])
-            intersection = max(0, ix2 - ix1) * max(0, iy2 - iy1)
-            union = a["width"] * a["height"] + b["width"] * b["height"] - intersection
-            if union and intersection / union >= 0.5:
-                duplicate = True
-                break
-        if not duplicate:
-            kept.append(item)
-    return kept
 
 
 def _fallback_phone_scan(frame):

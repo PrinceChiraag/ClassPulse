@@ -210,7 +210,13 @@ def _add_phone_scan(summary, frame, detection_settings=None):
         summary["phone_detection_status"] = "disabled"
         summary["phone_alert"] = False
         return summary
-    detections, detector_status = detect_phones(frame, confidence=float(settings.get("phone_confidence", 0.2)))
+    try:
+        detections, detector_status = detect_phones(frame, confidence=float(settings.get("phone_confidence", 0.12)))
+    except Exception:
+        # Phone detection is optional; a model/runtime failure must not discard
+        # valid face, attention, posture, or fatigue scores from this frame.
+        logger.exception("Phone detection failed; returning face analysis without phone results")
+        detections, detector_status = [], "error"
     summary["phone_detections"] = detections
     summary["phone_detection_status"] = detector_status
     summary["phone_alert"] = bool(detections)
@@ -418,7 +424,18 @@ def create_app():
     app.telemetry_store = TelemetryStore()
     db_path = Path(os.getenv("CLASSPULSE_DB_PATH", project_root / "classpulse" / "data" / "classpulse.db"))
     app.teacher_store = TeacherStore(db_path)
+    # Load the bundled detector while the service is starting, not during a
+    # teacher's first capture. This moves the model's cold-load delay out of
+    # the scan request and makes the first scan as responsive as later scans.
+    phone_status = phone_detector_runtime_status()
+    logger.info("Phone detector startup status: %s", phone_status)
     if production:
+        if app.teacher_store.database_backend == "sqlite":
+            logger.warning(
+                "Production is using SQLite at %s. Configure DATABASE_URL for managed PostgreSQL "
+                "or mount persistent storage at this path so teacher registrations survive restarts.",
+                db_path,
+            )
         app.teacher_store.remove_demo_teacher()
 
     @app.after_request
@@ -568,6 +585,7 @@ def create_app():
             "service": "ClassPulse",
             "version": "1.0.0",
             "database": app.teacher_store.database_backend,
+            "account_storage": "managed-database" if app.teacher_store.database_backend == "postgresql" else "sqlite-persistence-depends-on-host-volume",
             "phone_detector": phone_detector_runtime_status(),
             "face_detector": "ready" if mp is not None and hasattr(mp, "solutions") else "fallback",
             "fatigue_metrics": "ready" if mp is not None and hasattr(mp, "solutions") else "basic-estimate",
@@ -603,7 +621,14 @@ def create_app():
                 return jsonify({"success": False, "message": "Password must be at least 8 characters long."}), 400
             return render_template("login.html", error="Password must be at least 8 characters long.")
 
-        teacher = app.teacher_store.register_teacher(name, username, email, password, department)
+        try:
+            teacher = app.teacher_store.register_teacher(name, username, email, password, department)
+        except Exception:
+            logger.exception("Teacher registration could not reach the account database")
+            message = "Account storage is temporarily unavailable. Please retry in a moment."
+            if request.is_json:
+                return jsonify({"success": False, "error": "account_store_unavailable", "message": message}), 503
+            return render_template("login.html", error=message), 503
         if teacher is None:
             message = "That email or username is already registered. Try signing in, or choose a different username."
             if request.is_json:
@@ -627,7 +652,14 @@ def create_app():
                 return jsonify({"success": False, "message": "Email or username and password are required."}), 400
             return render_template("login.html", error="Email or username and password are required.")
 
-        teacher = app.teacher_store.authenticate_teacher(identifier, password)
+        try:
+            teacher = app.teacher_store.authenticate_teacher(identifier, password)
+        except Exception:
+            logger.exception("Teacher login could not reach the account database")
+            message = "Account storage is temporarily unavailable. Your account was not checked; please retry in a moment."
+            if request.is_json:
+                return jsonify({"success": False, "error": "account_store_unavailable", "message": message}), 503
+            return render_template("login.html", error=message), 503
         if teacher is None:
             if request.is_json:
                 return jsonify({"success": False, "message": "Invalid email/username or password."}), 401
@@ -646,7 +678,11 @@ def create_app():
         password = payload.get("password", "")
         if not identifier or not password:
             return jsonify({"success": False, "error": "validation_error", "message": "Email or username and password are required."}), 400
-        teacher = app.teacher_store.authenticate_teacher(identifier, password)
+        try:
+            teacher = app.teacher_store.authenticate_teacher(identifier, password)
+        except Exception:
+            logger.exception("Mobile teacher login could not reach the account database")
+            return jsonify({"success": False, "error": "account_store_unavailable", "message": "Account storage is temporarily unavailable."}), 503
         if teacher is None:
             return jsonify({"success": False, "error": "invalid_credentials", "message": "Invalid email/username or password."}), 401
         token = mobile_token_signer.dumps({
@@ -708,7 +744,7 @@ def create_app():
                     "face_blur": False,
                     "preview_blur": False,
                     "phone_detection": True,
-                    "phone_confidence": 0.2,
+                    "phone_confidence": 0.12,
                     "show_phone_boxes": True,
                     "sound_alerts": False,
                     "capture_interval": 5,
