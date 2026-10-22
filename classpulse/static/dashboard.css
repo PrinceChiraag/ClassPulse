@@ -1958,3 +1958,35 @@ input[type="range"] { accent-color: #087f78; }
 :root[data-theme="dark"] .main-panel .detail-card strong,
 :root[data-theme="dark"] .main-panel .face-detail-row strong,
 :root[data-theme="dark"] .main-panel .mini-stat-row strong { color: #eee9dd; }
+
+/* Capture progress stays over the live camera while the server evaluates the still frame. */
+.scan-progress-overlay {
+    position: absolute; inset: 0; z-index: 5; display: grid; place-items: center;
+    padding: 20px; color: #fff; background: rgba(8, 17, 20, .62); backdrop-filter: blur(3px);
+}
+.scan-progress-overlay[hidden] { display: none; }
+.scan-progress-overlay::after {
+    content: ""; position: absolute; left: 0; right: 0; top: 0; height: 3px;
+    background: linear-gradient(90deg, transparent, #93e5ce, #fff, #93e5ce, transparent);
+    box-shadow: 0 0 18px rgba(147, 229, 206, .9); animation: scan-sweep 1.8s ease-in-out infinite;
+}
+.scan-progress-card {
+    display: grid; justify-items: center; gap: 10px; max-width: min(92%, 390px);
+    padding: 20px 24px; text-align: center; border: 1px solid rgba(200, 245, 232, .38);
+    border-radius: 16px; background: rgba(16, 30, 32, .84); box-shadow: 0 14px 40px rgba(0,0,0,.3);
+}
+.scan-progress-card strong { color: #fff; font-size: 1.05rem; }
+.scan-progress-card > span:last-child { color: #d2e8e3; font-size: .86rem; line-height: 1.45; }
+.scan-progress-spinner {
+    width: 34px; height: 34px; border: 3px solid rgba(255,255,255,.27);
+    border-top-color: #9fe8d3; border-radius: 50%; animation: scan-spin .8s linear infinite;
+}
+@keyframes scan-spin { to { transform: rotate(360deg); } }
+@keyframes scan-sweep { 0% { transform: translateY(0); opacity: .35; } 50% { opacity: 1; } 100% { transform: translateY(var(--scan-height, 360px)); opacity: .35; } }
+.phone-detection-status.detected { color: #fff; background: rgba(174, 25, 25, .97); border-color: #ff8c82; box-shadow: 0 5px 20px rgba(170, 20, 20, .32); }
+.face-phone-warning { color: #b42318; background: #fff0ed; border-color: #ef4444; }
+:root[data-theme="dark"] .face-phone-warning { color: #fff0ed; background: rgba(127, 29, 29, .76); border-color: #ff6459; }
+:root[data-theme="dark"] .phone-scan-alert { color: #fff0ed; background: #651f1a; border-color: #ff6459; }
+@media (prefers-reduced-motion: reduce) {
+    .scan-progress-spinner, .scan-progress-overlay::after { animation-duration: 4s; }
+}

@@ -412,8 +412,30 @@ def test_phone_detector_uses_recall_friendly_model_settings(monkeypatch):
 
     assert status == "ready"
     assert detections == []
-    assert captured["conf"] == 0.2
+    assert captured["conf"] == 0.12
     assert captured["imgsz"] == 640
+
+
+def test_phone_detector_rechecks_large_phone_free_frames_in_overlapping_tiles(monkeypatch):
+    from classpulse import phone_detection
+
+    calls = []
+
+    class FakeModel:
+        names = {67: "cell phone"}
+
+        def predict(self, frame, **kwargs):
+            calls.append(frame.shape[:2])
+            return [SimpleNamespace(boxes=None)]
+
+    monkeypatch.setattr(phone_detection, "_get_model", lambda: FakeModel())
+    detections, status = phone_detection.detect_phones(np.zeros((720, 1280, 3), dtype=np.uint8))
+
+    assert status == "ready"
+    assert detections == []
+    assert len(calls) > 1
+    assert len(set(calls[1:])) > 1
+    assert all(shape[0] < 720 and shape[1] < 1280 for shape in calls[1:])
 
 
 def test_analyze_camera_frame_falls_back_when_mediapipe_is_unavailable():

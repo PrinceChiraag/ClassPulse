@@ -72,6 +72,7 @@ const heatmap = document.getElementById("heatmap");
 const alertList = document.getElementById("alert-list");
 const optionControls = document.getElementById("option-controls");
 const cameraFrame = document.querySelector(".camera-frame");
+const scanProgressOverlay = document.getElementById("scan-progress-overlay");
 const cameraAccessBanner = document.getElementById("camera-access-banner");
 
 let localStream = null;
@@ -294,7 +295,7 @@ function renderPhoneDetections(result) {
     if (phoneScanAlert) {
         phoneScanAlert.hidden = detections.length === 0;
         phoneScanAlert.textContent = detections.length
-            ? `Phone detected: ${detections.length} possible phone object${detections.length === 1 ? "" : "s"} in the frame. Please check the image and confirm the context.` 
+            ? `PHONE IS DETECTED: ${detections.length} phone object${detections.length === 1 ? "" : "s"} found in frame. Please check the image.`
             : "";
     }
     if (phoneOverlay && cameraFeed) {
@@ -321,16 +322,16 @@ function renderPhoneDetections(result) {
             const sourceX = cameraFeed.classList.contains("camera-mirrored") ? frameWidth - rawX - Number(box.width || 0) : rawX;
             const x = offsetX + sourceX * scale;
             ctx.lineWidth = Math.max(2 * dpr, width / 500);
-            ctx.strokeStyle = "#ffb44a";
-            ctx.fillStyle = "rgba(255, 180, 74, .16)";
+            ctx.strokeStyle = "#ff3030";
+            ctx.fillStyle = "rgba(255, 48, 48, .20)";
             ctx.strokeRect(x, y, w, h);
             ctx.fillRect(x, y, w, h);
             ctx.font = `${Math.max(14 * dpr, width / 55)}px Segoe UI, sans-serif`;
-            ctx.fillStyle = "#241b0e";
-            const label = `PHONE OBJECT ${Math.round(Number(item.confidence || 0) * 100)}%`;
+            ctx.fillStyle = "#ffffff";
+            const label = `PHONE DETECTED ${Math.round(Number(item.confidence || 0) * 100)}%`;
             const labelWidth = ctx.measureText(label).width + 12;
             ctx.fillRect(x, Math.max(0, y - 28 * dpr), labelWidth, 26 * dpr);
-            ctx.fillStyle = "#241b0e";
+            ctx.fillStyle = "#ffffff";
             ctx.fillText(label, x + 6 * dpr, Math.max(19 * dpr, y - 9 * dpr));
         });
     }
@@ -1061,7 +1062,7 @@ async function analyzeImageData(imageData, label = "camera") {
 
         if (cameraStatus) {
             if (result.phone_detections?.length) {
-                cameraStatus.textContent = `Phone warning · ${result.phone_detections.length} detected`;
+                cameraStatus.textContent = `PHONE IS DETECTED · ${result.phone_detections.length} found`;
                 cameraStatus.className = "status-pill idle";
             } else if (!result.face_detected) {
                 cameraStatus.textContent = "No face detected · retry scan";
@@ -1148,6 +1149,8 @@ async function capturePhotoForAnalysis() {
             }
             return;
         }
+        if (scanProgressOverlay) scanProgressOverlay.hidden = false;
+        cameraFrame?.setAttribute("aria-busy", "true");
         if (capturePhotoButton) {
             capturePhotoButton.disabled = true;
             capturePhotoButton.dataset.originalText = capturePhotoButton.textContent;
@@ -1180,6 +1183,8 @@ async function capturePhotoForAnalysis() {
             cameraStatus.className = "status-pill idle";
         }
     } finally {
+        if (scanProgressOverlay) scanProgressOverlay.hidden = true;
+        cameraFrame?.removeAttribute("aria-busy");
         if (capturePhotoButton) {
             capturePhotoButton.disabled = false;
             capturePhotoButton.textContent = capturePhotoButton.dataset.originalText || "Capture & analyze photo";
