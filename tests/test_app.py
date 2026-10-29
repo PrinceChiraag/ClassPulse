@@ -413,7 +413,7 @@ def test_phone_detector_uses_recall_friendly_model_settings(monkeypatch):
     assert status == "ready"
     assert detections == []
     assert captured["conf"] == 0.12
-    assert captured["imgsz"] == 640
+    assert captured["imgsz"] == 960
 
 
 def test_phone_detector_uses_a_single_inference_for_fast_large_frame_scans(monkeypatch):

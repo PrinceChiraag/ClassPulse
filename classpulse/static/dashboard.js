@@ -295,7 +295,7 @@ function renderPhoneDetections(result) {
     if (phoneScanAlert) {
         phoneScanAlert.hidden = detections.length === 0;
         phoneScanAlert.textContent = detections.length
-            ? `PHONE IS DETECTED: ${detections.length} phone object${detections.length === 1 ? "" : "s"} found in frame. Please check the image.`
+            ? `PHONE DETECTED: ${detections.length} phone${detections.length === 1 ? "" : "s"} found in frame.`
             : "";
     }
     if (phoneOverlay && cameraFeed) {
@@ -327,9 +327,9 @@ function renderPhoneDetections(result) {
             ctx.strokeRect(x, y, w, h);
             ctx.fillRect(x, y, w, h);
             ctx.font = `${Math.max(14 * dpr, width / 55)}px Segoe UI, sans-serif`;
-            ctx.fillStyle = "#ffffff";
             const label = `PHONE DETECTED ${Math.round(Number(item.confidence || 0) * 100)}%`;
             const labelWidth = ctx.measureText(label).width + 12;
+            ctx.fillStyle = "#b42318";
             ctx.fillRect(x, Math.max(0, y - 28 * dpr), labelWidth, 26 * dpr);
             ctx.fillStyle = "#ffffff";
             ctx.fillText(label, x + 6 * dpr, Math.max(19 * dpr, y - 9 * dpr));

@@ -1,16 +1,16 @@
 :root {
-    --bg: #081421;
-    --bg-alt: #0f1d2f;
-    --panel: rgba(15, 23, 42, 0.82);
-    --panel-strong: #101a2b;
-    --panel-soft: #17263d;
+    --bg: #101820;
+    --bg-alt: #1b2932;
+    --panel: rgba(27, 41, 50, 0.96);
+    --panel-strong: #1b2932;
+    --panel-soft: #263943;
     --line: rgba(148, 163, 184, 0.18);
-    --text: #edf6ff;
-    --muted: #9bb0c9;
-    --primary: #58d4ff;
-    --primary-strong: #36b9ea;
-    --secondary: #8b5cf6;
-    --success: #34d399;
+    --text: #f4f7f5;
+    --muted: #c0ceca;
+    --primary: #65d6c2;
+    --primary-strong: #32bda6;
+    --secondary: #ad9af5;
+    --success: #58d6a4;
     --success-soft: rgba(52, 211, 153, 0.14);
     --warning: #fbbf24;
     --danger: #f87171;
@@ -856,10 +856,10 @@ h1 {
 .phone-scan-alert {
     margin-top: 12px;
     padding: 14px 16px;
-    border: 2px solid #bd382e;
+    border: 2px solid #b42318;
     border-radius: 11px;
-    background: #fff0ed;
-    color: #8e231d;
+    background: #b42318;
+    color: #ffffff;
     font-size: .95rem;
     font-weight: 750;
     line-height: 1.45;

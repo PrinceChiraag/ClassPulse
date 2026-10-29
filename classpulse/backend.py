@@ -510,7 +510,7 @@ def create_app():
     def index():
         teacher = get_authenticated_teacher()
         if teacher is None:
-            return render_template("login.html")
+            return redirect(url_for("login_page"))
         return render_template("overview.html", teacher=teacher)
 
     @app.get("/overview")

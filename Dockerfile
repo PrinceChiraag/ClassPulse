@@ -28,4 +28,4 @@ ENV PORT=10000
 EXPOSE 10000
 
 # Keep worker alive with Gunicorn on 0.0.0.0:10000
-CMD ["gunicorn", "--bind", "0.0.0.0:10000", "--workers", "1", "--threads", "4", "--timeout", "120", "app:app"]
+CMD ["gunicorn", "--bind", "0.0.0.0:10000", "--workers", "1", "--threads", "4", "--timeout", "120", "wsgi:app"]
