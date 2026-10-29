@@ -77,8 +77,16 @@ class TeacherStore:
 
     def _connect(self) -> sqlite3.Connection:
         if self.use_postgres:
-            import psycopg
-            from psycopg.rows import dict_row
+            try:
+                import psycopg
+                from psycopg.rows import dict_row
+            except ModuleNotFoundError as exc:
+                if exc.name == "psycopg":
+                    raise RuntimeError(
+                        "DATABASE_URL selects PostgreSQL, but the Psycopg 3 driver is missing. "
+                        "Rebuild the deployment image after installing requirements.txt."
+                    ) from exc
+                raise
 
             return _PostgresConnection(psycopg.connect(self.database_url, row_factory=dict_row))
         connection = sqlite3.connect(self.db_path)
