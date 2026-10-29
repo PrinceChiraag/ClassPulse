@@ -1,80 +1,70 @@
 import os
-from flask import Flask, jsonify, request
+from flask import Flask, jsonify, request, render_template, redirect, url_for
 from database import init_db, SessionLocal, User, Detection
 
-# Initialize Flask application
-app = Flask(__name__)
+# Initialize Flask with explicit templates and static directories
+app = Flask(
+    __name__,
+    template_folder="templates",
+    static_folder="static"
+)
 
-# Run database schema initialization on startup
+# Initialize database schema on startup
 try:
     init_db()
 except Exception as e:
     print(f"Database initialization warning: {e}")
 
 
-# --- Health & Root Routes ---
+# ==========================================
+# 1. FRONTEND PAGE ROUTES
+# ==========================================
 
 @app.route("/", methods=["GET"])
+def home():
+    # Serves dashboard as the landing page
+    return render_template("dashboard.html")
+
+@app.route("/login", methods=["GET"])
+def login_page():
+    return render_template("login.html")
+
+@app.route("/dashboard", methods=["GET"])
+def dashboard_page():
+    return render_template("dashboard.html")
+
+@app.route("/classroom", methods=["GET"])
+def classroom_page():
+    return render_template("classroom.html")
+
+@app.route("/camera", methods=["GET"])
+def camera_page():
+    return render_template("camera.html")
+
+@app.route("/camera-settings", methods=["GET"])
+def camera_settings_page():
+    return render_template("camera_settings.html")
+
+@app.route("/overview", methods=["GET"])
+def overview_page():
+    return render_template("overview.html")
+
+@app.route("/settings", methods=["GET"])
+def settings_page():
+    return render_template("settings.html")
+
+
+# ==========================================
+# 2. BACKEND API ROUTES
+# ==========================================
+
+@app.route("/api/health", methods=["GET"])
 def health_check():
     return jsonify({
         "status": "online",
         "service": "ClassPulse API",
         "database": "Supabase PostgreSQL connected"
     }), 200
-
-
-# --- Database Helper Functions ---
-
-def register_user(username: str, email: str, password_hash: str):
-    db = SessionLocal()
-    try:
-        existing = db.query(User).filter((User.username == username) | (User.email == email)).first()
-        if existing:
-            return {"status": "error", "message": "User already exists"}
-        new_user = User(username=username, email=email, password=password_hash)
-        db.add(new_user)
-        db.commit()
-        db.refresh(new_user)
-        return {"status": "success", "user_id": new_user.id}
-    except Exception as err:
-        db.rollback()
-        return {"status": "error", "message": str(err)}
-    finally:
-        db.close()
-
-
-def authenticate_user(email: str, password_hash: str):
-    db = SessionLocal()
-    try:
-        user = db.query(User).filter(User.email == email, User.password == password_hash).first()
-        if user:
-            return {
-                "status": "success",
-                "user": {"id": user.id, "username": user.username, "email": user.email}
-            }
-        return {"status": "error", "message": "Invalid email or password"}
-    finally:
-        db.close()
-
-
-def log_detection(object_name: str, confidence: float, camera_id: str = "classroom_cam"):
-    db = SessionLocal()
-    try:
-        detection = Detection(
-            camera_id=camera_id,
-            object_name=object_name,
-            confidence=float(confidence)
-        )
-        db.add(detection)
-        db.commit()
-    except Exception as err:
-        db.rollback()
-        print(f"Failed to log detection: {err}")
-    finally:
-        db.close()
-
-
-# --- API Endpoints ---
 
 @app.route("/api/register", methods=["POST"])
 def handle_register():
@@ -84,12 +74,24 @@ def handle_register():
     password = data.get("password")
 
     if not username or not email or not password:
-        return jsonify({"status": "error", "message": "Missing fields"}), 400
+        return jsonify({"status": "error", "message": "Missing required fields"}), 400
 
-    result = register_user(username, email, password)
-    status_code = 200 if result["status"] == "success" else 400
-    return jsonify(result), status_code
+    db = SessionLocal()
+    try:
+        existing = db.query(User).filter((User.username == username) | (User.email == email)).first()
+        if existing:
+            return jsonify({"status": "error", "message": "Username or email already in use"}), 400
 
+        new_user = User(username=username, email=email, password=password)
+        db.add(new_user)
+        db.commit()
+        db.refresh(new_user)
+        return jsonify({"status": "success", "user_id": new_user.id}), 200
+    except Exception as err:
+        db.rollback()
+        return jsonify({"status": "error", "message": str(err)}), 500
+    finally:
+        db.close()
 
 @app.route("/api/login", methods=["POST"])
 def handle_login():
@@ -100,10 +102,17 @@ def handle_login():
     if not email or not password:
         return jsonify({"status": "error", "message": "Missing email or password"}), 400
 
-    result = authenticate_user(email, password)
-    status_code = 200 if result["status"] == "success" else 401
-    return jsonify(result), status_code
-
+    db = SessionLocal()
+    try:
+        user = db.query(User).filter(User.email == email, User.password == password).first()
+        if user:
+            return jsonify({
+                "status": "success",
+                "user": {"id": user.id, "username": user.username, "email": user.email}
+            }), 200
+        return jsonify({"status": "error", "message": "Invalid email or password"}), 401
+    finally:
+        db.close()
 
 @app.route("/api/detections", methods=["GET"])
 def list_detections():
@@ -126,9 +135,12 @@ def list_detections():
         db.close()
 
 
-# Keep server persistently alive and bind to dynamic Render environment
+# ==========================================
+# 3. SERVER ENTRYPOINT
+# ==========================================
+
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 10000))
     host = os.environ.get("HOST", "0.0.0.0")
-    print(f"Starting ClassPulse server on {host}:{port}...")
+    print(f"Starting ClassPulse on {host}:{port}...")
     app.run(host=host, port=port)
