@@ -91,10 +91,9 @@ def detect_phones(frame, confidence=0.12):
                 return detections, "fallback" if detections else "no-phone-class"
         # Ultralytics models are shared by threaded Flask requests; serialize inference.
         with _model_lock:
-            # A larger inference scale helps detect smaller phones and partial
-            # devices at the edge of a webcam frame. The model still emits boxes
-            # clipped to the visible image, so incomplete phones can be flagged.
-            result = model.predict(frame, classes=class_ids, conf=float(confidence), imgsz=960, verbose=False)[0]
+            # Keep CPU and memory usage bounded on small hosted instances. Face
+            # metrics are computed independently before this optional pass.
+            result = model.predict(frame, classes=class_ids, conf=float(confidence), imgsz=640, verbose=False)[0]
         detections = _read_result(result)
         return detections, "ready"
     except Exception as exc:

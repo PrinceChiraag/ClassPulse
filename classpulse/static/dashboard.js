@@ -90,7 +90,7 @@ let dashboardConfig = {
         face_blur: false,
         preview_blur: false,
         phone_detection: true,
-        phone_confidence: 0.12,
+        phone_confidence: 0.08,
         show_phone_boxes: true,
         sound_alerts: false,
         auto_refresh: true,
@@ -222,7 +222,7 @@ function renderControls() {
     }
 
     if (phoneConfidenceInput) {
-        const value = Number(dashboardConfig.controls.phone_confidence ?? 0.12);
+        const value = Number(dashboardConfig.controls.phone_confidence ?? 0.08);
         phoneConfidenceInput.value = String(value);
         if (phoneConfidenceLabel) phoneConfidenceLabel.textContent = value.toFixed(2);
     }
@@ -1023,7 +1023,7 @@ async function analyzeImageData(imageData, label = "camera") {
                     posture_analysis: dashboardConfig.controls.posture_analysis !== false,
                     fatigue_detection: dashboardConfig.controls.fatigue_detection !== false,
                     phone_detection: dashboardConfig.controls.phone_detection !== false,
-                    phone_confidence: Number(dashboardConfig.controls.phone_confidence ?? 0.12),
+                    phone_confidence: Number(dashboardConfig.controls.phone_confidence ?? 0.08),
                 },
             }),
         });

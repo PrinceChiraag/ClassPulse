@@ -211,7 +211,7 @@ def _add_phone_scan(summary, frame, detection_settings=None):
         summary["phone_alert"] = False
         return summary
     try:
-        detections, detector_status = detect_phones(frame, confidence=float(settings.get("phone_confidence", 0.12)))
+        detections, detector_status = detect_phones(frame, confidence=float(settings.get("phone_confidence", 0.08)))
     except Exception:
         # Phone detection is optional; a model/runtime failure must not discard
         # valid face, attention, posture, or fatigue scores from this frame.
@@ -752,7 +752,7 @@ def create_app():
                     "face_blur": False,
                     "preview_blur": False,
                     "phone_detection": True,
-                    "phone_confidence": 0.12,
+                    "phone_confidence": 0.08,
                     "show_phone_boxes": True,
                     "sound_alerts": False,
                     "capture_interval": 5,
