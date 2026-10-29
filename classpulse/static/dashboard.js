@@ -43,6 +43,7 @@ const historyBody = document.getElementById("history-body");
 const cameraToggle = document.getElementById("camera-toggle");
 const capturePhotoButton = document.getElementById("capture-photo");
 const clearPhotoButton = document.getElementById("clear-photo");
+const resetScanButton = document.getElementById("reset-scan");
 const syncDashboardButton = document.getElementById("sync-dashboard");
 const logoutButton = document.getElementById("logout-button");
 const cameraFeed = document.getElementById("camera-feed");
@@ -1120,11 +1121,32 @@ async function analyzeImageData(imageData, label = "camera") {
             if (phoneDetectionStatus) {
                 phoneDetectionStatus.classList.remove("detected");
                 phoneDetectionStatus.classList.add("unavailable");
-                phoneDetectionStatus.textContent = "Phone scan skipped because image analysis failed";
+                phoneDetectionStatus.textContent = "Image analysis failed; adjust the camera and retry";
             }
+            if (phoneScanAlert) {
+                phoneScanAlert.hidden = true;
+                phoneScanAlert.textContent = "";
+            }
+            if (summarySelectors.phone_warning) summarySelectors.phone_warning.hidden = true;
             if (phoneOverlay) phoneOverlay.getContext("2d")?.clearRect(0, 0, phoneOverlay.width, phoneOverlay.height);
         }
         throw error;
+    }
+}
+
+function resetScanResults() {
+    clearCapturedPhoto();
+    renderFaceDetails({ face_detected: false, faces: [] });
+    renderPhoneDetections({ phone_detections: [], phone_detection_status: "ready" });
+    for (const key of ["average_attention", "eye_engagement", "posture_score", "fatigue_alerts", "active_students"]) {
+        if (summarySelectors[key]) summarySelectors[key].textContent = "--";
+    }
+    if (summarySelectors.student_count) summarySelectors.student_count.textContent = "Waiting for scan";
+    if (summarySelectors.room_status) summarySelectors.room_status.textContent = "Waiting";
+    if (summarySelectors.status_detail) summarySelectors.status_detail.textContent = "Ready for a new capture";
+    if (cameraStatus) {
+        cameraStatus.textContent = localStream ? "Camera live · ready to retake" : "Ready to scan";
+        cameraStatus.className = localStream ? "status-pill live" : "status-pill idle";
     }
 }
 
@@ -1458,6 +1480,7 @@ if (clearPhotoButton) {
         }
     });
 }
+if (resetScanButton) resetScanButton.addEventListener("click", resetScanResults);
 if (syncDashboardButton) {
     syncDashboardButton.addEventListener("click", refreshDashboard);
 }

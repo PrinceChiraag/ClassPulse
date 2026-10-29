@@ -379,7 +379,15 @@ def analyze_camera_frame(frame, detection_mode="multi-face", detection_settings=
     except Exception:
         logger.exception("MediaPipe face/fatigue analysis failed; using basic fallback")
         close_face_analyzers()
-        fallback = _fallback_face_metrics(frame)
+        try:
+            fallback = _fallback_face_metrics(frame)
+        except Exception:
+            logger.exception("Basic face fallback failed; returning neutral scores")
+            fallback = {
+                "attention": 0.0, "fatigue": 1.0, "fatigue_index": 100.0,
+                "eye_engagement": 0.0, "posture_score": 0.0,
+                "face_detected": False, "face_count": 0, "faces": [],
+            }
         fallback["analysis_mode"] = "basic-fallback"
         return _add_phone_scan(build_face_summary(fallback), frame, detection_settings)
     finally:
