@@ -1,15 +1,25 @@
 import os
-from flask import Flask, jsonify, request, render_template, redirect, url_for
+from flask import Flask, jsonify, request, render_template
 from database import init_db, SessionLocal, User, Detection
 
-# Initialize Flask with explicit templates and static directories
+# Locate the actual templates and static directories
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+TEMPLATE_DIR = os.path.join(BASE_DIR, "classpulse", "templates")
+STATIC_DIR = os.path.join(BASE_DIR, "classpulse", "static")
+
+if not os.path.exists(TEMPLATE_DIR):
+    TEMPLATE_DIR = os.path.join(BASE_DIR, "templates")
+
+if not os.path.exists(STATIC_DIR):
+    STATIC_DIR = os.path.join(BASE_DIR, "static")
+
 app = Flask(
     __name__,
-    template_folder="templates",
-    static_folder="static"
+    template_folder=TEMPLATE_DIR,
+    static_folder=STATIC_DIR
 )
 
-# Initialize database schema on startup
+# Initialize Supabase schema
 try:
     init_db()
 except Exception as e:
@@ -22,7 +32,6 @@ except Exception as e:
 
 @app.route("/", methods=["GET"])
 def home():
-    # Serves dashboard as the landing page
     return render_template("dashboard.html")
 
 @app.route("/login", methods=["GET"])
@@ -63,7 +72,8 @@ def health_check():
     return jsonify({
         "status": "online",
         "service": "ClassPulse API",
-        "database": "Supabase PostgreSQL connected"
+        "database": "Supabase PostgreSQL connected",
+        "template_dir": TEMPLATE_DIR
     }), 200
 
 @app.route("/api/register", methods=["POST"])
