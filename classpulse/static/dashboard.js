@@ -79,6 +79,7 @@ const cameraAccessBanner = document.getElementById("camera-access-banner");
 let localStream = null;
 let privacyWireframeEnabled = false;
 let dashboardRefreshTimer = null;
+let phoneScanSequence = 0;
 const scoreHistory = [];
 let dashboardConfig = {
     controls: {
@@ -312,7 +313,7 @@ function renderPhoneDetections(result) {
         }
         const ctx = phoneOverlay.getContext("2d");
         ctx.clearRect(0, 0, width, height);
-        const scale = Math.max(width / frameWidth, height / frameHeight);
+        const scale = Math.min(width / frameWidth, height / frameHeight);
         const offsetX = (width - frameWidth * scale) / 2;
         const offsetY = (height - frameHeight * scale) / 2;
         if (dashboardConfig.controls.show_phone_boxes !== false) detections.forEach((item) => {
@@ -1000,6 +1001,7 @@ function clearCapturedPhoto() {
 }
 
 async function analyzeImageData(imageData, label = "camera") {
+    const currentPhoneScan = ++phoneScanSequence;
     try {
         const studentName = document.getElementById("student-name")?.value.trim() || "";
         const studentClass = document.getElementById("student-class")?.value.trim() || "";
@@ -1014,6 +1016,7 @@ async function analyzeImageData(imageData, label = "camera") {
             body: JSON.stringify({
                 image_data: imageData,
                 source: label,
+                defer_phone_detection: true,
                 ...(saveStudentScan ? { student: { name: studentName, class_name: studentClass, roll_number: studentRoll } } : {}),
                 detection_mode: dashboardConfig.controls.student_tracking === false ? "single-user" : (dashboardConfig.controls.detection_mode || "multi-face"),
                 detection_settings: {
@@ -1022,8 +1025,7 @@ async function analyzeImageData(imageData, label = "camera") {
                     posture_tilt_degrees: Number(dashboardConfig.controls.posture_tilt_degrees ?? 18),
                     posture_analysis: dashboardConfig.controls.posture_analysis !== false,
                     fatigue_detection: dashboardConfig.controls.fatigue_detection !== false,
-                    phone_detection: dashboardConfig.controls.phone_detection !== false,
-                    phone_confidence: Number(dashboardConfig.controls.phone_confidence ?? 0.08),
+                    phone_detection: false,
                 },
             }),
         });
@@ -1046,6 +1048,13 @@ async function analyzeImageData(imageData, label = "camera") {
             summarySelectors.eye_engagement.textContent = `${(Number(result.eye_engagement || 0) * 100).toFixed(1)}%`;
         }
         const faceMetrics = Array.isArray(result.faces) && result.faces.length ? result.faces : (result.face_detected ? [result] : []);
+        if (dashboardConfig.controls.phone_detection !== false) {
+            if (phoneDetectionStatus) {
+                phoneDetectionStatus.classList.remove("detected", "unavailable");
+                phoneDetectionStatus.textContent = "Face scores ready · checking for phones…";
+            }
+            void analyzePhoneImage(imageData, currentPhoneScan);
+        }
         const alertThreshold = Number(dashboardConfig.controls.alert_threshold ?? 0.7);
         const fatigueAlertCount = dashboardConfig.controls.fatigue_detection === false ? 0 : faceMetrics.filter((face) =>
             Number(face.fatigue_index ?? Number(face.fatigue || 0) * 100) / 100 >= alertThreshold ||
@@ -1129,12 +1138,40 @@ async function analyzeImageData(imageData, label = "camera") {
             }
             if (summarySelectors.phone_warning) summarySelectors.phone_warning.hidden = true;
             if (phoneOverlay) phoneOverlay.getContext("2d")?.clearRect(0, 0, phoneOverlay.width, phoneOverlay.height);
+            if (dashboardConfig.controls.phone_detection !== false) {
+                if (phoneDetectionStatus) phoneDetectionStatus.textContent = "Face scan failed · trying phone check separately…";
+                void analyzePhoneImage(imageData, currentPhoneScan);
+            }
         }
         throw error;
     }
 }
 
+async function analyzePhoneImage(imageData, scanSequence) {
+    try {
+        const response = await fetch("/api/phone-detect", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                image_data: imageData,
+                confidence: Number(dashboardConfig.controls.phone_confidence ?? 0.08),
+            }),
+        });
+        const result = await response.json().catch(() => ({}));
+        if (scanSequence !== phoneScanSequence) return;
+        if (!response.ok && !result.phone_detection_status) {
+            result.phone_detection_status = "error";
+        }
+        renderPhoneDetections(result);
+    } catch (error) {
+        if (scanSequence !== phoneScanSequence) return;
+        console.warn("Phone check failed; face scores remain available", error);
+        renderPhoneDetections({ phone_detections: [], phone_detection_status: "error" });
+    }
+}
+
 function resetScanResults() {
+    phoneScanSequence += 1;
     clearCapturedPhoto();
     renderFaceDetails({ face_detected: false, faces: [] });
     renderPhoneDetections({ phone_detections: [], phone_detection_status: "ready" });

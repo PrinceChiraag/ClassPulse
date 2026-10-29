@@ -60,10 +60,10 @@ def _phone_class_ids(model):
 
 
 def phone_detector_runtime_status():
-    """Load the configured detector and describe whether it can run here."""
-    model = _get_model()
+    """Describe detector state without loading its heavyweight runtime."""
+    model = _model
     if model is None:
-        return _model_status or "unavailable"
+        return _model_status or "not-loaded"
     if _phone_class_ids(model):
         return "ready"
     names = model.names if isinstance(model.names, dict) else dict(enumerate(model.names))

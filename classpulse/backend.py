@@ -55,7 +55,7 @@ def build_face_summary(metrics: dict) -> dict:
     face_detected = bool(metrics.get("face_detected", metrics.get("face_count", 0) > 0))
 
     drowsiness_state = metrics.get("drowsiness_state", "Alert")
-    fatigue_index = float(metrics.get("fatigue_index", 0.0))
+    fatigue_index = float(metrics.get("fatigue_index", fatigue * 100.0))
     microsleep = bool(metrics.get("microsleep", False))
     yawning = bool(metrics.get("yawning", False))
 
@@ -244,7 +244,9 @@ def analyze_camera_frame(frame, detection_mode="multi-face", detection_settings=
 
     try:
         settings = detection_settings or {}
-        max_faces = 1 if str(detection_mode or "multi-face").lower() == "single-user" else 20
+        # Bound classroom-mode inference on CPU hosted instances. Very high
+        # limits make one still image needlessly expensive and can time out scans.
+        max_faces = 1 if str(detection_mode or "multi-face").lower() == "single-user" else 6
         face_mesh = mp.solutions.face_mesh.FaceMesh(
             static_image_mode=False,
             max_num_faces=max_faces,
@@ -432,11 +434,9 @@ def create_app():
     app.telemetry_store = TelemetryStore()
     db_path = Path(os.getenv("CLASSPULSE_DB_PATH", project_root / "classpulse" / "data" / "classpulse.db"))
     app.teacher_store = TeacherStore(db_path)
-    # Load the bundled detector while the service is starting, not during a
-    # teacher's first capture. This moves the model's cold-load delay out of
-    # the scan request and makes the first scan as responsive as later scans.
-    phone_status = phone_detector_runtime_status()
-    logger.info("Phone detector startup status: %s", phone_status)
+    # Keep the optional PyTorch/YOLO runtime out of worker startup and face
+    # scans. It is loaded on demand by the independent phone-detection endpoint.
+    logger.info("Phone detector configured for on-demand loading")
     if production:
         if app.teacher_store.database_backend == "sqlite":
             logger.warning(
@@ -876,16 +876,32 @@ def create_app():
 
             detection_settings = payload.get("detection_settings") or {}
             detection_mode = payload.get("detection_mode") or "multi-face"
+            # Browser scans run phone inference through a separate endpoint so
+            # its model latency cannot prevent face/fatigue scores from returning.
+            if request.path == "/api/scan" and payload.get("defer_phone_detection") is True:
+                detection_settings = {**detection_settings, "phone_detection": False}
             scan_session = getattr(g, "mobile_scan_session", None) or session.setdefault("scan_session", secrets.token_urlsafe(12))
-            metrics = analyze_camera_frame(frame, detection_mode=detection_mode, detection_settings=detection_settings, scan_session=scan_session)
-            app.telemetry_store.append(
-                attention=metrics.get("attention", 0),
-                fatigue=metrics.get("fatigue", 0),
-                timestamp=payload.get("timestamp"),
-                teacher_id=int(get_authenticated_teacher()["id"]),
-                eye_engagement=metrics.get("eye_engagement", 0),
-                posture_score=metrics.get("posture_score", 0),
-            )
+            analysis_frame = frame
+            longest_side = max(frame.shape[:2])
+            if longest_side > 960:
+                scale = 960 / longest_side
+                analysis_frame = cv2.resize(
+                    frame,
+                    (round(frame.shape[1] * scale), round(frame.shape[0] * scale)),
+                    interpolation=cv2.INTER_AREA,
+                )
+            metrics = analyze_camera_frame(analysis_frame, detection_mode=detection_mode, detection_settings=detection_settings, scan_session=scan_session)
+            try:
+                app.telemetry_store.append(
+                    attention=metrics.get("attention", 0),
+                    fatigue=metrics.get("fatigue", 0),
+                    timestamp=payload.get("timestamp"),
+                    teacher_id=int(get_authenticated_teacher()["id"]),
+                    eye_engagement=metrics.get("eye_engagement", 0),
+                    posture_score=metrics.get("posture_score", 0),
+                )
+            except Exception:
+                logger.exception("Could not append scan telemetry; returning face scores")
             teacher = get_authenticated_teacher()
             if teacher is not None and all(identity_values):
                 try:
@@ -893,6 +909,9 @@ def create_app():
                     metrics["saved_scan"] = saved
                 except ValueError as exc:
                     return jsonify({"error": str(exc), "status": "invalid-student"}), 400
+                except Exception:
+                    logger.exception("Could not save scan image; returning computed face scores")
+                    metrics["saved_scan_error"] = "Scan scores were calculated, but saving the image failed."
 
             return jsonify({"status": "ok", "frame_width": int(frame.shape[1]), "frame_height": int(frame.shape[0]), **metrics})
         except Exception as exc:  # pragma: no cover - guard for invalid browser payloads
@@ -904,6 +923,43 @@ def create_app():
                 "status": "error",
                 "error": message,
             }), 500
+
+    @app.post("/api/phone-detect")
+    def detect_phone_in_scan():
+        payload = request.get_json(silent=True) or {}
+        image_data = payload.get("image_data", "") if isinstance(payload, dict) else ""
+        if not isinstance(image_data, str) or not image_data:
+            return jsonify({"error": "A captured image is required.", "status": "invalid-image"}), 400
+        try:
+            if image_data.startswith("data:image"):
+                header, encoded = image_data.split(",", 1)
+                mime = header[5:].split(";", 1)[0]
+                if mime not in {"image/jpeg", "image/png", "image/webp"}:
+                    return jsonify({"error": "Unsupported image type.", "status": "invalid-image"}), 400
+            else:
+                encoded = image_data
+            image_bytes = base64.b64decode(encoded, validate=True)
+            frame = cv2.imdecode(np.frombuffer(image_bytes, dtype=np.uint8), cv2.IMREAD_COLOR)
+            if frame is None:
+                return jsonify({"error": "The captured image could not be read.", "status": "invalid-image"}), 400
+            confidence = max(0.02, min(0.8, float(payload.get("confidence", 0.08))))
+            detections, detector_status = detect_phones(frame, confidence=confidence)
+            return jsonify({
+                "phone_detections": detections,
+                "phone_detection_status": detector_status,
+                "phone_alert": bool(detections),
+                "frame_width": int(frame.shape[1]),
+                "frame_height": int(frame.shape[0]),
+            })
+        except Exception:
+            logger.exception("Standalone phone detection failed")
+            return jsonify({
+                "error": "Phone detection is temporarily unavailable.",
+                "status": "error",
+                "phone_detections": [],
+                "phone_detection_status": "error",
+                "phone_alert": False,
+            }), 200
 
     @app.post("/api/telemetry")
     @app.post("/api/v1/telemetry")
