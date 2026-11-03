@@ -1,7 +1,7 @@
+
 import base64
 import logging
 import os
-import re
 import secrets
 import threading
 import time
@@ -15,7 +15,7 @@ from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
 
 try:
     import mediapipe as mp
-except Exception:  # pragma: no cover - fallback when dependency is unavailable
+except Exception:
     mp = None
 
 from classpulse.metrics import compute_attention_fatigue
@@ -23,7 +23,6 @@ from classpulse.phone_detection import detect_phones, phone_detector_runtime_sta
 from classpulse.store import TeacherStore, TelemetryStore, validate_email, validate_username
 
 
-EMAIL_PATTERN = re.compile(r"^[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+$")
 _scan_tracks = {}
 _scan_tracks_lock = threading.Lock()
 logger = logging.getLogger(__name__)
@@ -35,10 +34,12 @@ def _face_bbox(face_landmarks, frame_width: int, frame_height: int) -> dict:
 
     xs = [point.x for point in face_landmarks]
     ys = [point.y for point in face_landmarks]
+
     x0 = min(xs) * frame_width
     y0 = min(ys) * frame_height
     x1 = max(xs) * frame_width
     y1 = max(ys) * frame_height
+
     return {
         "x": int(round(x0)),
         "y": int(round(y0)),
@@ -52,7 +53,10 @@ def build_face_summary(metrics: dict) -> dict:
     fatigue = float(metrics.get("fatigue", 0.0))
     eye_engagement = float(metrics.get("eye_engagement", 0.0))
     posture_score = float(metrics.get("posture_score", 0.0))
-    face_detected = bool(metrics.get("face_detected", metrics.get("face_count", 0) > 0))
+
+    face_detected = bool(
+        metrics.get("face_detected", metrics.get("face_count", 0) > 0)
+    )
 
     drowsiness_state = metrics.get("drowsiness_state", "Alert")
     fatigue_index = float(metrics.get("fatigue_index", fatigue * 100.0))
@@ -62,35 +66,115 @@ def build_face_summary(metrics: dict) -> dict:
     if not face_detected:
         status = "No clear face detected"
         risk_level = "Needs reset"
-        recommendation = "Adjust lighting, keep the student facing the camera, and retry the scan with the face fully visible."
+        recommendation = (
+            "Adjust lighting, keep the student facing the camera, "
+            "and retry the scan with the face fully visible."
+        )
         confidence = 0.0
+
     elif drowsiness_state == "Yawning":
         status = "Yawning"
         risk_level = "High"
-        recommendation = "Yawning is increasing. Pause for a short reset and re-engage the class with a quick verbal prompt."
-        confidence = round(max(0.0, min(100.0, (attention * 0.45) + (fatigue_index * 0.35) + (posture_score * 100 * 0.2))), 1)
+        recommendation = (
+            "Yawning is increasing. Pause for a short reset and "
+            "re-engage the class with a quick verbal prompt."
+        )
+        confidence = round(
+            max(
+                0.0,
+                min(
+                    100.0,
+                    (attention * 0.45)
+                    + (fatigue_index * 0.35)
+                    + (posture_score * 100 * 0.2),
+                ),
+            ),
+            1,
+        )
+
     elif drowsiness_state == "Drowsy" or microsleep:
         status = "Drowsy"
         risk_level = "High"
-        recommendation = "The student shows drowsiness signs. Encourage movement, hydration, or a short activity break."
-        confidence = round(max(0.0, min(100.0, (attention * 0.5) + (fatigue_index * 0.4) + (posture_score * 100 * 0.1))), 1)
+        recommendation = (
+            "The student shows drowsiness signs. Encourage movement, "
+            "hydration, or a short activity break."
+        )
+        confidence = round(
+            max(
+                0.0,
+                min(
+                    100.0,
+                    (attention * 0.5)
+                    + (fatigue_index * 0.4)
+                    + (posture_score * 100 * 0.1),
+                ),
+            ),
+            1,
+        )
+
     elif attention >= 80:
         status = "Focused"
         risk_level = "Low"
-        recommendation = "Strong attention and stable posture. Continue the current teaching flow."
-        confidence = round(max(0.0, min(100.0, (attention * 0.6) + (posture_score * 100 * 0.25) + (eye_engagement * 100 * 0.15))), 1)
+        recommendation = (
+            "Strong attention and stable posture. Continue the current teaching flow."
+        )
+        confidence = round(
+            max(
+                0.0,
+                min(
+                    100.0,
+                    (attention * 0.6)
+                    + (posture_score * 100 * 0.25)
+                    + (eye_engagement * 100 * 0.15),
+                ),
+            ),
+            1,
+        )
+
     elif attention >= 60:
         status = "Watch"
         risk_level = "Moderate"
-        recommendation = "Slight fatigue risk. Encourage a quick engagement reset or brief pause."
-        confidence = round(max(0.0, min(100.0, (attention * 0.55) + (posture_score * 100 * 0.3) + (eye_engagement * 100 * 0.15))), 1)
+        recommendation = (
+            "Slight fatigue risk. Encourage a quick engagement reset or brief pause."
+        )
+        confidence = round(
+            max(
+                0.0,
+                min(
+                    100.0,
+                    (attention * 0.55)
+                    + (posture_score * 100 * 0.3)
+                    + (eye_engagement * 100 * 0.15),
+                ),
+            ),
+            1,
+        )
+
     else:
         status = "High fatigue risk"
         risk_level = "High"
-        recommendation = "Attention is dipping. Pause and re-engage the class with a clear instruction or activity change."
-        confidence = round(max(0.0, min(100.0, (attention * 0.5) + (posture_score * 100 * 0.35) + (eye_engagement * 100 * 0.15))), 1)
+        recommendation = (
+            "Attention is dipping. Pause and re-engage the class "
+            "with a clear instruction or activity change."
+        )
+        confidence = round(
+            max(
+                0.0,
+                min(
+                    100.0,
+                    (attention * 0.5)
+                    + (posture_score * 100 * 0.35)
+                    + (eye_engagement * 100 * 0.15),
+                ),
+            ),
+            1,
+        )
 
-    overall_score = round((attention * 0.55) + (posture_score * 100 * 0.25) + (eye_engagement * 100 * 0.2), 1)
+    overall_score = (
+        (attention * 0.55)
+        + (posture_score * 100 * 0.25)
+        + (eye_engagement * 100 * 0.2)
+    )
 
     summary = {
         "attention": round(attention, 1),
@@ -111,26 +195,38 @@ def build_face_summary(metrics: dict) -> dict:
         "faces": metrics.get("faces", []),
         "analysis_mode": metrics.get("analysis_mode", "landmark"),
     }
+
     if "student_details" in metrics:
         summary["student_details"] = metrics["student_details"]
+
     return summary
 
 
 def _fallback_face_metrics(frame):
     gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
     gray = cv2.equalizeHist(gray)
+
     faces = ()
-    # Try the more tolerant frontal models when the default cascade misses a
-    # face, so a MediaPipe failure does not automatically become an empty scan.
+
     for cascade_name, neighbors in (
         ("haarcascade_frontalface_default.xml", 4),
         ("haarcascade_frontalface_alt2.xml", 3),
         ("haarcascade_frontalface_alt.xml", 3),
     ):
-        cascade = cv2.CascadeClassifier(cv2.data.haarcascades + cascade_name)
+        cascade = cv2.CascadeClassifier(
+            cv2.data.haarcascades + cascade_name
+        )
+
         if cascade.empty():
             continue
-        faces = cascade.detectMultiScale(gray, scaleFactor=1.08, minNeighbors=neighbors, minSize=(32, 32))
+
+        faces = cascade.detectMultiScale(
+            gray,
+            scaleFactor=1.08,
+            minNeighbors=neighbors,
+            minSize=(32, 32),
+        )
+
         if len(faces):
             break
 
@@ -148,44 +244,139 @@ def _fallback_face_metrics(frame):
     entries = []
     frame_area = max(frame.shape[0] * frame.shape[1], 1)
     laplacian = cv2.Laplacian(gray, cv2.CV_64F)
+
     for index, (x, y, w, h) in enumerate(faces):
-        face = gray[y : y + h, x : x + w]
+        face = gray[y:y + h, x:x + w]
         face_area = w * h
+
         brightness = float(face.mean()) / 255.0
-        edge_focus = float(laplacian[y : y + h, x : x + w].var()) / 255.0
-        posture_score = max(0.0, min(1.0, 0.55 + (brightness * 0.25) + (min(edge_focus, 1.0) * 0.2)))
-        attention = max(0.0, min(100.0, (face_area / frame_area) * 1000 + brightness * 45 + edge_focus * 25))
-        eye_engagement = max(0.0, min(1.0, brightness * 1.5 + edge_focus * 0.4))
-        fatigue = max(0.0, min(1.0, (1.0 - (attention / 100.0)) * 0.8 + (1.0 - posture_score) * 0.35))
-        entries.append({"attention": attention, "fatigue": fatigue, "fatigue_index": round(fatigue * 100, 1),
-                        "drowsiness_state": "Basic estimate", "microsleep": False, "yawning": False,
-                        "eye_engagement": eye_engagement,
-                        "posture_score": posture_score, "label": f"Student {index + 1}",
-                        "face_index": index, "bbox": {"x": int(x), "y": int(y), "width": int(w), "height": int(h)}})
+        edge_focus = (
+            float(laplacian[y:y + h, x:x + w].var()) / 255.0
+        )
+
+        posture_score = max(
+            0.0,
+            min(
+                1.0,
+                0.55 + (brightness * 0.25)
+                + (min(edge_focus, 1.0) * 0.2),
+            ),
+        )
+
+        attention = max(
+            0.0,
+            min(
+                100.0,
+                (face_area / frame_area) * 1000
+                + brightness * 45
+                + edge_focus * 25,
+            ),
+        )
+
+        eye_engagement = max(
+            0.0,
+            min(1.0, brightness * 1.5 + edge_focus * 0.4),
+        )
+
+        fatigue = max(
+            0.0,
+            min(
+                1.0,
+                (1.0 - (attention / 100.0)) * 0.8
+                + (1.0 - posture_score) * 0.35,
+            ),
+        )
+
+        entries.append(
+            {
+                "attention": attention,
+                "fatigue": fatigue,
+                "fatigue_index": round(fatigue * 100, 1),
+                "drowsiness_state": "Basic estimate",
+                "microsleep": False,
+                "yawning": False,
+                "eye_engagement": eye_engagement,
+                "posture_score": posture_score,
+                "label": f"Student {index + 1}",
+                "face_index": index,
+                "bbox": {
+                    "x": int(x),
+                    "y": int(y),
+                    "width": int(w),
+                    "height": int(h),
+                },
+            }
+        )
+
     if len(entries) == 1:
-        return {**entries[0], "face_detected": True, "face_count": 1, "faces": entries, "analysis_mode": "basic-fallback"}
-    return {"attention": round(sum(e["attention"] for e in entries) / len(entries), 1),
-            "fatigue": round(sum(e["fatigue"] for e in entries) / len(entries), 3),
-            "eye_engagement": round(sum(e["eye_engagement"] for e in entries) / len(entries), 3),
-            "posture_score": round(sum(e["posture_score"] for e in entries) / len(entries), 3),
-            "face_detected": True, "face_count": len(entries), "faces": entries, "analysis_mode": "basic-fallback"}
+        return {
+            **entries[0],
+            "face_detected": True,
+            "face_count": 1,
+            "faces": entries,
+            "analysis_mode": "basic-fallback",
+        }
+
+    return {
+        "attention": round(
+            sum(e["attention"] for e in entries) / len(entries), 1
+        ),
+        "fatigue": round(
+            sum(e["fatigue"] for e in entries) / len(entries), 3
+        ),
+        "eye_engagement": round(
+            sum(e["eye_engagement"] for e in entries) / len(entries), 3
+        ),
+        "posture_score": round(
+            sum(e["posture_score"] for e in entries) / len(entries), 3
+        ),
+        "face_detected": True,
+        "face_count": len(entries),
+        "faces": entries,
+        "analysis_mode": "basic-fallback",
+    }
 
 
 def _aggregate_face_scan(face_entries):
     if not face_entries:
-        return build_face_summary({"attention": 0.0, "fatigue": 1.0, "eye_engagement": 0.0, "posture_score": 0.0, "face_detected": False, "face_count": 0, "faces": []})
+        return build_face_summary(
+            {
+                "attention": 0.0,
+                "fatigue": 1.0,
+                "eye_engagement": 0.0,
+                "posture_score": 0.0,
+                "face_detected": False,
+                "face_count": 0,
+                "faces": [],
+            }
+        )
 
-    average_attention = sum(item["attention"] for item in face_entries) / len(face_entries)
-    average_eye = sum(item["eye_engagement"] for item in face_entries) / len(face_entries)
-    average_posture = sum(item["posture_score"] for item in face_entries) / len(face_entries)
-    average_fatigue = sum(item["fatigue"] for item in face_entries) / len(face_entries)
-    average_fatigue_index = sum(item.get("fatigue_index", 0.0) for item in face_entries) / len(face_entries)
+    average_attention = (
+        sum(item["attention"] for item in face_entries) / len(face_entries)
+    )
+    average_eye = (
+        sum(item["eye_engagement"] for item in face_entries) / len(face_entries)
+    )
+    average_posture = (
+        sum(item["posture_score"] for item in face_entries) / len(face_entries)
+    )
+    average_fatigue = (
+        sum(item["fatigue"] for item in face_entries) / len(face_entries)
+    )
+    average_fatigue_index = (
+        sum(item.get("fatigue_index", 0.0) for item in face_entries)
+        / len(face_entries)
+    )
+
     aggregate = {
         "attention": round(average_attention, 1),
         "fatigue": round(average_fatigue, 3),
         "eye_engagement": round(average_eye, 3),
         "posture_score": round(average_posture, 3),
-        "drowsiness_state": max(face_entries, key=lambda item: item.get("fatigue_index", 0.0)).get("drowsiness_state", "Alert"),
+        "drowsiness_state": max(
+            face_entries,
+            key=lambda item: item.get("fatigue_index", 0.0),
+        ).get("drowsiness_state", "Alert"),
         "fatigue_index": round(average_fatigue_index, 1),
         "face_count": len(face_entries),
         "faces": face_entries,
@@ -200,53 +391,78 @@ def _aggregate_face_scan(face_entries):
             for index, item in enumerate(face_entries)
         ],
     }
+
     return build_face_summary(aggregate)
 
 
 def _add_phone_scan(summary, frame, detection_settings=None):
     settings = detection_settings or {}
+
     if settings.get("phone_detection", True) is False:
         summary["phone_detections"] = []
         summary["phone_detection_status"] = "disabled"
         summary["phone_alert"] = False
         return summary
+
     try:
-        detections, detector_status = detect_phones(frame, confidence=float(settings.get("phone_confidence", 0.08)))
+        detections, detector_status = detect_phones(
+            frame,
+            confidence=float(settings.get("phone_confidence", 0.08)),
+        )
     except Exception:
-        # Phone detection is optional; a model/runtime failure must not discard
-        # valid face, attention, posture, or fatigue scores from this frame.
-        logger.exception("Phone detection failed; returning face analysis without phone results")
+        logger.exception(
+            "Phone detection failed; returning face analysis without phone results"
+        )
         detections, detector_status = [], "error"
+
     summary["phone_detections"] = detections
     summary["phone_detection_status"] = detector_status
     summary["phone_alert"] = bool(detections)
+
     return summary
 
 
-def analyze_camera_frame(frame, detection_mode="multi-face", detection_settings=None, scan_session="default"):
+def analyze_camera_frame(
+    frame,
+    detection_mode="multi-face",
+    detection_settings=None,
+    scan_session="default",
+):
     if mp is None or not hasattr(mp, "solutions"):
         fallback = _fallback_face_metrics(frame)
         fallback["analysis_mode"] = "basic-fallback"
-        return _add_phone_scan(build_face_summary(fallback), frame, detection_settings)
+
+        return _add_phone_scan(
+            build_face_summary(fallback),
+            frame,
+            detection_settings,
+        )
 
     face_mesh = None
     pose = None
 
     def close_face_analyzers():
         nonlocal face_mesh, pose
+
         for analyzer in (face_mesh, pose):
             if analyzer is not None:
                 try:
                     analyzer.close()
                 except Exception:
                     logger.exception("Failed to close MediaPipe analyzer")
-        face_mesh = pose = None
+
+        face_mesh = None
+        pose = None
 
     try:
         settings = detection_settings or {}
-        # Bound classroom-mode inference on CPU hosted instances. Very high
-        # limits make one still image needlessly expensive and can time out scans.
-        max_faces = 1 if str(detection_mode or "multi-face").lower() == "single-user" else 6
+
+        max_faces = (
+            1
+            if str(detection_mode or "multi-face").lower() == "single-user"
+            else 6
+        )
+
         face_mesh = mp.solutions.face_mesh.FaceMesh(
             static_image_mode=False,
             max_num_faces=max_faces,
@@ -254,9 +470,9 @@ def analyze_camera_frame(frame, detection_mode="multi-face", detection_settings=
             min_detection_confidence=0.35,
             min_tracking_confidence=0.5,
         )
-        # Pose is a single-person model. Skip it entirely in classroom mode;
-        # a whole-frame pose failure must not discard successful face landmarks.
+
         pose_result = None
+
         if max_faces == 1 and settings.get("posture_analysis", True):
             try:
                 pose = mp.solutions.pose.Pose(
@@ -265,57 +481,122 @@ def analyze_camera_frame(frame, detection_mode="multi-face", detection_settings=
                     min_detection_confidence=0.5,
                     min_tracking_confidence=0.5,
                 )
-                pose_result = pose.process(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
+
+                pose_result = pose.process(
+                    cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                )
+
             except Exception:
-                logger.exception("Pose analysis failed; continuing with face-landmark posture fallback")
+                logger.exception(
+                    "Pose analysis failed; continuing with face-landmark posture fallback"
+                )
+
                 if pose is not None:
                     try:
                         pose.close()
                     except Exception:
                         logger.exception("Failed to close pose analyzer")
+
                     pose = None
+
         rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         face_result = face_mesh.process(rgb)
 
         face_entries = []
-        detected_faces = getattr(face_result, "multi_face_landmarks", None) or []
+
+        detected_faces = (
+            getattr(face_result, "multi_face_landmarks", None) or []
+        )
+
         if not detected_faces:
-            # Face Detection uses a dedicated detector and can recover faces
-            # that the landmark tracker misses in a first or low-light frame.
             detector = None
+
             try:
                 detector = mp.solutions.face_detection.FaceDetection(
                     model_selection=1 if max(frame.shape[:2]) > 640 else 0,
                     min_detection_confidence=0.35,
                 )
+
                 detection_result = detector.process(rgb)
-                for detection in getattr(detection_result, "detections", None) or []:
-                    relative = detection.location_data.relative_bounding_box
-                    x0 = max(0, int(relative.xmin * frame.shape[1]))
-                    y0 = max(0, int(relative.ymin * frame.shape[0]))
-                    x1 = min(frame.shape[1], int((relative.xmin + relative.width) * frame.shape[1]))
-                    y1 = min(frame.shape[0], int((relative.ymin + relative.height) * frame.shape[0]))
+
+                for detection in (
+                    getattr(detection_result, "detections", None) or []
+                ):
+                    relative = (
+                        detection.location_data.relative_bounding_box
+                    )
+
+                    x0 = max(
+                        0,
+                        int(relative.xmin * frame.shape[1]),
+                    )
+                    y0 = max(
+                        0,
+                        int(relative.ymin * frame.shape[0]),
+                    )
+                    x1 = min(
+                        frame.shape[1],
+                        int(
+                            (relative.xmin + relative.width)
+                            * frame.shape[1]
+                        ),
+                    )
+                    y1 = min(
+                        frame.shape[0],
+                        int(
+                            (relative.ymin + relative.height)
+                            * frame.shape[0]
+                        ),
+                    )
+
                     if x1 <= x0 or y1 <= y0:
                         continue
+
                     confidence = float(detection.score[0])
-                    eye_engagement = max(0.0, min(1.0, confidence * 0.8))
+                    eye_engagement = max(
+                        0.0,
+                        min(1.0, confidence * 0.8),
+                    )
                     attention = round(confidence * 100, 1)
-                    fatigue = round(max(0.0, min(1.0, 1.0 - confidence)), 3)
-                    face_entries.append({
-                        "attention": attention, "fatigue": fatigue,
-                        "fatigue_index": round(fatigue * 100, 1),
-                        "eye_engagement": eye_engagement, "posture_score": 0.7,
-                        "drowsiness_state": "Needs clearer face landmarks",
-                        "microsleep": False, "yawning": False,
-                        "label": f"Student {len(face_entries) + 1}",
-                        "face_index": len(face_entries),
-                        "confidence": round(confidence * 100, 1),
-                        "overall_score": round((attention * .55) + (70 * .25) + (eye_engagement * 100 * .2), 1),
-                        "bbox": {"x": x0, "y": y0, "width": x1 - x0, "height": y1 - y0},
-                        "analysis_mode": "face-detection-fallback",
-                    })
+                    fatigue = round(
+                        max(0.0, min(1.0, 1.0 - confidence)),
+                        3,
+                    )
+
+                    face_entries.append(
+                        {
+                            "attention": attention,
+                            "fatigue": fatigue,
+                            "fatigue_index": round(fatigue * 100, 1),
+                            "eye_engagement": eye_engagement,
+                            "posture_score": 0.7,
+                            "drowsiness_state": "Needs clearer face landmarks",
+                            "microsleep": False,
+                            "yawning": False,
+                            "label": f"Student {len(face_entries) + 1}",
+                            "face_index": len(face_entries),
+                            "confidence": round(confidence * 100, 1),
+                            "overall_score": round(
+                                (attention * 0.55)
+                                + (70 * 0.25)
+                                + (eye_engagement * 100 * 0.2),
+                                1,
+                            ),
+                            "bbox": {
+                                "x": x0,
+                                "y": y0,
+                                "width": x1 - x0,
+                                "height": y1 - y0,
+                            },
+                            "analysis_mode": "face-detection-fallback",
+                        }
+                    )
+
             except Exception:
-                logger.exception("Dedicated face detection fallback failed")
+                logger.exception(
+                    "Dedicated face detection fallback failed"
+                )
+
             finally:
                 if detector is not None:
                     try:
@@ -325,73 +606,204 @@ def analyze_camera_frame(frame, detection_mode="multi-face", detection_settings=
 
         if detected_faces:
             timestamp = time.monotonic()
+
             with _scan_tracks_lock:
-                tracks = _scan_tracks.setdefault(str(scan_session), [])
-                tracks[:] = [track for track in tracks if timestamp - track["seen"] < 8.0]
+                tracks = _scan_tracks.setdefault(
+                    str(scan_session),
+                    [],
+                )
+
+                tracks[:] = [
+                    track
+                    for track in tracks
+                    if timestamp - track["seen"] < 8.0
+                ]
+
                 if len(_scan_tracks) > 128:
-                    oldest = sorted(_scan_tracks, key=lambda key: max((t["seen"] for t in _scan_tracks[key]), default=0))[:32]
+                    oldest = sorted(
+                        _scan_tracks,
+                        key=lambda key: max(
+                            (
+                                track["seen"]
+                                for track in _scan_tracks[key]
+                            ),
+                            default=0,
+                        ),
+                    )[:32]
+
                     for key in oldest:
                         _scan_tracks.pop(key, None)
+
                 used_tracks = set()
+
                 for index, face in enumerate(detected_faces[:max_faces]):
-                    bbox = _face_bbox(face.landmark, frame.shape[1], frame.shape[0])
-                    center = ((bbox["x"] + bbox["width"] / 2) / frame.shape[1], (bbox["y"] + bbox["height"] / 2) / frame.shape[0])
-                    candidates = [(i, track) for i, track in enumerate(tracks) if i not in used_tracks and ((track["center"][0] - center[0]) ** 2 + (track["center"][1] - center[1]) ** 2) ** .5 < .16]
+                    bbox = _face_bbox(
+                        face.landmark,
+                        frame.shape[1],
+                        frame.shape[0],
+                    )
+
+                    center = (
+                        (
+                            bbox["x"] + bbox["width"] / 2
+                        ) / frame.shape[1],
+                        (
+                            bbox["y"] + bbox["height"] / 2
+                        ) / frame.shape[0],
+                    )
+
+                    candidates = [
+                        (i, track)
+                        for i, track in enumerate(tracks)
+                        if i not in used_tracks
+                        and (
+                            (
+                                track["center"][0] - center[0]
+                            ) ** 2
+                            + (
+                                track["center"][1] - center[1]
+                            ) ** 2
+                        ) ** 0.5 < 0.16
+                    ]
+
                     if candidates:
-                        track_index, track = min(candidates, key=lambda item: (item[1]["center"][0] - center[0]) ** 2 + (item[1]["center"][1] - center[1]) ** 2)
+                        track_index, track = min(
+                            candidates,
+                            key=lambda item: (
+                                item[1]["center"][0] - center[0]
+                            ) ** 2
+                            + (
+                                item[1]["center"][1] - center[1]
+                            ) ** 2,
+                        )
+
                         used_tracks.add(track_index)
                         track["center"] = center
                         track["seen"] = timestamp
                         local_state = track["state"]
+
                     else:
-                        local_state = {"ear": deque(maxlen=90), "mar": deque(maxlen=90), "pitch": deque(maxlen=90)}
-                        tracks.append({"center": center, "seen": timestamp, "state": local_state})
-                    # Pose processes the whole frame and can lock onto a different
-                    # person in a multi-face classroom. Face landmarks are more
-                    # reliable for the individual eye based evaluation; keep the
-                    # neutral posture fallback when pose is ambiguous.
-                    pose_landmarks = getattr(pose_result, "pose_landmarks", None) if pose_result is not None else None
-                    metrics = compute_attention_fatigue(face.landmark, pose_landmarks, settings, rolling_state=local_state)
+                        local_state = {
+                            "ear": deque(maxlen=90),
+                            "mar": deque(maxlen=90),
+                            "pitch": deque(maxlen=90),
+                        }
+
+                        tracks.append(
+                            {
+                                "center": center,
+                                "seen": timestamp,
+                                "state": local_state,
+                            }
+                        )
+
+                    pose_landmarks = (
+                        getattr(pose_result, "pose_landmarks", None)
+                        if pose_result is not None
+                        else None
+                    )
+
+                    metrics = compute_attention_fatigue(
+                        face.landmark,
+                        pose_landmarks,
+                        settings,
+                        rolling_state=local_state,
+                    )
+
                     if not settings.get("fatigue_detection", True):
-                        metrics.update({"fatigue": 0.0, "fatigue_index": 0.0, "microsleep": False, "yawning": False, "drowsiness_state": "Disabled"})
+                        metrics.update(
+                            {
+                                "fatigue": 0.0,
+                                "fatigue_index": 0.0,
+                                "microsleep": False,
+                                "yawning": False,
+                                "drowsiness_state": "Disabled",
+                            }
+                        )
+
                     metrics["label"] = f"Student {index + 1}"
                     metrics["face_index"] = index
                     metrics["bbox"] = bbox
-                    metrics["confidence"] = round(max(0.0, min(100.0,
-                        (metrics.get("attention", 0.0) * 0.55)
-                        + (metrics.get("posture_score", 0.0) * 25)
-                        + (metrics.get("eye_engagement", 0.0) * 20))), 1)
+
+                    metrics["confidence"] = round(
+                        max(
+                            0.0,
+                            min(
+                                100.0,
+                                (metrics.get("attention", 0.0) * 0.55)
+                                + (metrics.get("posture_score", 0.0) * 25)
+                                + (metrics.get("eye_engagement", 0.0) * 20),
+                            ),
+                        ),
+                        1,
+                    )
+
                     metrics["overall_score"] = metrics["confidence"]
                     face_entries.append(metrics)
 
         if face_entries:
-            # MediaPipe and PyTorch/YOLO are both memory intensive. Close
-            # landmark graphs before loading/running the phone detector.
             close_face_analyzers()
-            if face_entries[0].get("analysis_mode") == "face-detection-fallback":
-                summary = build_face_summary({
-                    **face_entries[0], "face_detected": True, "face_count": len(face_entries),
-                    "faces": face_entries, "analysis_mode": "face-detection-fallback",
-                })
+
+            if (
+                face_entries[0].get("analysis_mode")
+                == "face-detection-fallback"
+            ):
+                summary = build_face_summary(
+                    {
+                        **face_entries[0],
+                        "face_detected": True,
+                        "face_count": len(face_entries),
+                        "faces": face_entries,
+                        "analysis_mode": "face-detection-fallback",
+                    }
+                )
+
                 return _add_phone_scan(summary, frame, settings)
+
             result = _aggregate_face_scan(face_entries)
+
             return _add_phone_scan(result, frame, settings)
+
         close_face_analyzers()
-        return _add_phone_scan(build_face_summary(_fallback_face_metrics(frame)), frame, settings)
+
+        return _add_phone_scan(
+            build_face_summary(_fallback_face_metrics(frame)),
+            frame,
+            settings,
+        )
+
     except Exception:
-        logger.exception("MediaPipe face/fatigue analysis failed; using basic fallback")
+        logger.exception(
+            "MediaPipe face/fatigue analysis failed; using basic fallback"
+        )
+
         close_face_analyzers()
+
         try:
             fallback = _fallback_face_metrics(frame)
+
         except Exception:
-            logger.exception("Basic face fallback failed; returning neutral scores")
+            logger.exception("Basic face fallback failed")
+
             fallback = {
-                "attention": 0.0, "fatigue": 1.0, "fatigue_index": 100.0,
-                "eye_engagement": 0.0, "posture_score": 0.0,
-                "face_detected": False, "face_count": 0, "faces": [],
+                "attention": 0.0,
+                "fatigue": 1.0,
+                "fatigue_index": 100.0,
+                "eye_engagement": 0.0,
+                "posture_score": 0.0,
+                "face_detected": False,
+                "face_count": 0,
+                "faces": [],
             }
+
         fallback["analysis_mode"] = "basic-fallback"
-        return _add_phone_scan(build_face_summary(fallback), frame, detection_settings)
+
+        return _add_phone_scan(
+            build_face_summary(fallback),
+            frame,
+            detection_settings,
+        )
+
     finally:
         for analyzer in (face_mesh, pose):
             if analyzer is not None:
@@ -403,6 +815,7 @@ def analyze_camera_frame(frame, detection_mode="multi-face", detection_settings=
 
 def create_app():
     project_root = Path(__file__).resolve().parent.parent
+
     template_folder = project_root / "classpulse" / "templates"
     static_folder = project_root / "classpulse" / "static"
 
@@ -411,14 +824,46 @@ def create_app():
         template_folder=str(template_folder),
         static_folder=str(static_folder),
     )
+
+    # Production configuration
     secret_key = os.getenv("SECRET_KEY")
-    production = os.getenv("FLASK_ENV", "").lower() == "production" or os.getenv("APP_ENV", "").lower() == "production"
-    if production and (not secret_key or len(secret_key) < 32):
-        raise RuntimeError("Production requires SECRET_KEY to be set to at least 32 characters.")
+
+    production = (
+        os.getenv("FLASK_ENV", "").lower() == "production"
+        or os.getenv("APP_ENV", "").lower() == "production"
+    )
+
+    if production and (
+        not secret_key or len(secret_key) < 32
+    ):
+        raise RuntimeError(
+            "Production requires SECRET_KEY to be set to at least 32 characters."
+        )
+
+    database_url = os.getenv("DATABASE_URL", "").strip()
+
+    if production and not database_url.startswith(
+        (
+            "postgresql://",
+            "postgres://",
+            "postgresql+psycopg://",
+        )
+    ):
+        raise RuntimeError(
+            "Production requires DATABASE_URL configured with a Supabase PostgreSQL connection."
+        )
+
     app.secret_key = secret_key or secrets.token_hex(32)
-    mobile_token_signer = URLSafeTimedSerializer(app.secret_key, salt="classpulse-mobile-api-v1")
+
+    mobile_token_signer = URLSafeTimedSerializer(
+        app.secret_key,
+        salt="classpulse-mobile-api-v1",
+    )
+
     mobile_token_ttl = 60 * 60 * 12
+
     is_https = production or os.getenv("ENABLE_HTTPS", "0") == "1"
+
     app.config.update(
         SESSION_COOKIE_SECURE=is_https,
         SESSION_COOKIE_HTTPONLY=True,
@@ -427,31 +872,49 @@ def create_app():
         MAX_CONTENT_LENGTH=8 * 1024 * 1024,
         PREFERRED_URL_SCHEME="https" if is_https else "http",
     )
+
     if os.getenv("TRUST_PROXY", "0") == "1":
         from werkzeug.middleware.proxy_fix import ProxyFix
 
-        app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1)
+        app.wsgi_app = ProxyFix(
+            app.wsgi_app,
+            x_for=1,
+            x_proto=1,
+            x_host=1,
+        )
+
+    # These stores are created once per application worker.
     app.telemetry_store = TelemetryStore()
-    db_path = Path(os.getenv("CLASSPULSE_DB_PATH", project_root / "classpulse" / "data" / "classpulse.db"))
+
+    db_path = Path(
+        os.getenv(
+            "CLASSPULSE_DB_PATH",
+            project_root / "classpulse" / "data" / "classpulse.db",
+        )
+    )
+
+    # TeacherStore selects PostgreSQL automatically when DATABASE_URL
+    # contains the configured PostgreSQL connection string.
     app.teacher_store = TeacherStore(db_path)
-    # Keep the optional PyTorch/YOLO runtime out of worker startup and face
-    # scans. It is loaded on demand by the independent phone-detection endpoint.
+
+    logger.info(
+        "ClassPulse account database initialized: %s",
+        app.teacher_store.database_backend,
+    )
+
     logger.info("Phone detector configured for on-demand loading")
-    if production:
-        if app.teacher_store.database_backend == "sqlite":
-            logger.warning(
-                "Production is using SQLite at %s. Configure DATABASE_URL for managed PostgreSQL "
-                "or mount persistent storage at this path so teacher registrations survive restarts.",
-                db_path,
-            )
-        app.teacher_store.remove_demo_teacher()
 
     @app.after_request
     def add_security_headers(response):
         response.headers["X-Frame-Options"] = "DENY"
         response.headers["X-Content-Type-Options"] = "nosniff"
-        response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
-        response.headers["Permissions-Policy"] = "camera=(self), microphone=(), geolocation=()"
+        response.headers["Referrer-Policy"] = (
+            "strict-origin-when-cross-origin"
+        )
+        response.headers["Permissions-Policy"] = (
+            "camera=(self), microphone=(), geolocation=()"
+        )
+
         response.headers["Content-Security-Policy"] = (
             "default-src 'self'; "
             "script-src 'self' 'unsafe-inline'; "
@@ -463,270 +926,618 @@ def create_app():
             "base-uri 'self'; "
             "form-action 'self'"
         )
+
         if is_https:
-            response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+            response.headers["Strict-Transport-Security"] = (
+                "max-age=31536000; includeSubDomains"
+            )
+
         return response
 
     @app.before_request
     def enforce_https_redirect():
         if not is_https or request.is_secure:
             return None
+
         if request.host and request.host.startswith("127.0.0.1"):
-            return redirect("https://127.0.0.1:5000" + request.path, code=301)
+            return redirect(
+                "https://127.0.0.1:5000" + request.path,
+                code=301,
+            )
+
         return None
 
     @app.before_request
     def authenticate_mobile_api():
-        if not request.path.startswith("/api/v1/") or request.path == "/api/v1/auth/login":
+        if (
+            not request.path.startswith("/api/v1/")
+            or request.path == "/api/v1/auth/login"
+        ):
             return None
+
         authorization = request.headers.get("Authorization", "")
         scheme, _, token = authorization.partition(" ")
+
         if scheme.lower() != "bearer" or not token:
-            return jsonify({"success": False, "error": "unauthorized", "message": "A bearer access token is required."}), 401
+            return (
+                jsonify(
+                    {
+                        "success": False,
+                        "error": "unauthorized",
+                        "message": "A bearer access token is required.",
+                    }
+                ),
+                401,
+            )
+
         try:
-            claims = mobile_token_signer.loads(token, max_age=mobile_token_ttl)
-            teacher = app.teacher_store.get_teacher_by_id(int(claims["teacher_id"]))
-        except (BadSignature, SignatureExpired, KeyError, TypeError, ValueError):
+            claims = mobile_token_signer.loads(
+                token,
+                max_age=mobile_token_ttl,
+            )
+
+            teacher = app.teacher_store.get_teacher_by_id(
+                int(claims["teacher_id"])
+            )
+
+        except (
+            BadSignature,
+            SignatureExpired,
+            KeyError,
+            TypeError,
+            ValueError,
+        ):
             teacher = None
             claims = {}
+
         if teacher is None:
-            return jsonify({"success": False, "error": "unauthorized", "message": "The access token is invalid or expired."}), 401
+            return (
+                jsonify(
+                    {
+                        "success": False,
+                        "error": "unauthorized",
+                        "message": "The access token is invalid or expired.",
+                    }
+                ),
+                401,
+            )
+
         g.mobile_teacher = teacher
-        g.mobile_scan_session = claims.get("scan_session", f"teacher-{teacher['id']}")
+        g.mobile_scan_session = claims.get(
+            "scan_session",
+            f"teacher-{teacher['id']}",
+        )
+
         return None
 
     def get_authenticated_teacher():
         mobile_teacher = getattr(g, "mobile_teacher", None)
+
         if mobile_teacher is not None:
             return mobile_teacher
+
         teacher_id = session.get("teacher_id")
+
         if teacher_id is None:
             return None
+
         return app.teacher_store.get_teacher_by_id(int(teacher_id))
 
     @app.before_request
     def require_teacher_for_api():
         if not request.path.startswith("/api/"):
             return None
-        if request.path in {"/api/auth/login", "/api/auth/register", "/api/v1/auth/login"}:
+
+        public_api_routes = {
+            "/api/auth/login",
+            "/api/auth/register",
+            "/api/auth/forgot-password",
+            "/api/v1/auth/login",
+        }
+
+        if request.path in public_api_routes:
             return None
+
         if get_authenticated_teacher() is None:
-            return jsonify({"success": False, "error": "unauthorized", "message": "Sign in as a teacher to use this endpoint."}), 401
+            return (
+                jsonify(
+                    {
+                        "success": False,
+                        "error": "unauthorized",
+                        "message": "Sign in as a teacher to use this endpoint.",
+                    }
+                ),
+                401,
+            )
+
         return None
 
     @app.get("/")
     def index():
         teacher = get_authenticated_teacher()
+
         if teacher is None:
             return redirect(url_for("login_page"))
+
         return render_template("overview.html", teacher=teacher)
 
     @app.get("/overview")
     def overview_page():
         teacher = get_authenticated_teacher()
+
         if teacher is None:
             return redirect(url_for("login_page"))
+
         return render_template("overview.html", teacher=teacher)
 
     @app.get("/manifest.webmanifest")
     def web_manifest():
-        return jsonify({
-            "name": "ClassPulse Teacher Portal",
-            "short_name": "ClassPulse",
-            "description": "Privacy-first classroom engagement and fatigue checks.",
-            "start_url": "/overview",
-            "scope": "/",
-            "display": "standalone",
-            "background_color": "#f4f8f7",
-            "theme_color": "#087f78",
-            "orientation": "any",
-            "icons": [
-                {"src": "/static/icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any"},
-                {"src": "/static/icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any"},
-                {"src": "/static/icons/icon-512-maskable.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable"},
-            ],
-        })
+        return jsonify(
+            {
+                "name": "ClassPulse Teacher Portal",
+                "short_name": "ClassPulse",
+                "description": (
+                    "Privacy-first classroom engagement and fatigue checks."
+                ),
+                "start_url": "/overview",
+                "scope": "/",
+                "display": "standalone",
+                "background_color": "#f4f8f7",
+                "theme_color": "#087f78",
+                "orientation": "any",
+                "icons": [
+                    {
+                        "src": "/static/icons/icon-192.png",
+                        "sizes": "192x192",
+                        "type": "image/png",
+                        "purpose": "any",
+                    },
+                    {
+                        "src": "/static/icons/icon-512.png",
+                        "sizes": "512x512",
+                        "type": "image/png",
+                        "purpose": "any",
+                    },
+                    {
+                        "src": "/static/icons/icon-512-maskable.png",
+                        "sizes": "512x512",
+                        "type": "image/png",
+                        "purpose": "maskable",
+                    },
+                ],
+            }
+        )
 
     @app.get("/service-worker.js")
     def service_worker():
         response = app.send_static_file("service-worker.js")
         response.headers["Service-Worker-Allowed"] = "/"
         response.headers["Cache-Control"] = "no-cache"
+
         return response
 
     @app.get("/classroom")
     def classroom_page():
         teacher = get_authenticated_teacher()
+
         if teacher is None:
             return redirect(url_for("login_page"))
+
         return render_template("classroom.html", teacher=teacher)
 
     @app.get("/login")
     def login_page():
-        return render_template("login.html", show_demo_credentials=not production)
+        return render_template(
+            "login.html",
+            show_demo_credentials=not production,
+        )
 
     @app.get("/camera")
     def camera_page():
         teacher = get_authenticated_teacher()
+
         if teacher is None:
             return redirect(url_for("login_page"))
+
         return render_template("camera.html", teacher=teacher)
 
     @app.get("/camera-settings")
     def camera_settings_page():
         teacher = get_authenticated_teacher()
+
         if teacher is None:
             return redirect(url_for("login_page"))
+
         return render_template("camera_settings.html", teacher=teacher)
 
     @app.get("/settings")
     def settings_page():
         teacher = get_authenticated_teacher()
+
         if teacher is None:
             return redirect(url_for("login_page"))
+
         return render_template("settings.html", teacher=teacher)
 
     @app.get("/health")
     def health():
-        return jsonify({
-            "status": "ok",
-            "service": "ClassPulse",
-            "version": "1.0.0",
-            "database": app.teacher_store.database_backend,
-            "account_storage": "managed-database" if app.teacher_store.database_backend == "postgresql" else "sqlite-persistence-depends-on-host-volume",
-            "phone_detector": phone_detector_runtime_status(),
-            "face_detector": "ready" if mp is not None and hasattr(mp, "solutions") else "fallback",
-            "fatigue_metrics": "ready" if mp is not None and hasattr(mp, "solutions") else "basic-estimate",
-        })
+        return jsonify(
+            {
+                "status": "ok",
+                "service": "ClassPulse",
+                "version": "1.0.0",
+                "database": app.teacher_store.database_backend,
+                "account_storage": (
+                    "managed-database"
+                    if app.teacher_store.database_backend == "postgresql"
+                    else "sqlite-persistence-depends-on-host-volume"
+                ),
+                "phone_detector": phone_detector_runtime_status(),
+                "face_detector": (
+                    "ready"
+                    if mp is not None and hasattr(mp, "solutions")
+                    else "fallback"
+                ),
+                "fatigue_metrics": (
+                    "ready"
+                    if mp is not None and hasattr(mp, "solutions")
+                    else "basic-estimate"
+                ),
+            }
+        )
 
     @app.post("/api/auth/register")
     def register_teacher():
         raw = request.get_json(silent=True) or request.form or {}
-        name = raw.get("name", "").strip()
-        username = raw.get("username", "").strip()
-        email = raw.get("email", "").strip().lower()
+
+        name = str(raw.get("name", "")).strip()
+        username = str(raw.get("username", "")).strip()
+        email = str(raw.get("email", "")).strip().lower()
         password = raw.get("password", "")
-        department = raw.get("department", "").strip()
+        department = str(raw.get("department", "")).strip()
+
+        if not isinstance(password, str):
+            password = ""
 
         if not name or not username or not email or not password:
+            message = (
+                "Name, username, email, and password are required."
+            )
+
             if request.is_json:
-                return jsonify({"success": False, "message": "Name, username, email, and password are required."}), 400
-            return render_template("login.html", error="Name, username, email, and password are required.")
+                return jsonify(
+                    {"success": False, "message": message}
+                ), 400
+
+            return render_template("login.html", error=message)
 
         if len(name) > 100 or not validate_username(username):
-            message = "Username must be 3–30 characters using letters, numbers, dots, dashes, or underscores."
+            message = (
+                "Username must be 3–30 characters using letters, "
+                "numbers, dots, dashes, or underscores."
+            )
+
             if request.is_json:
-                return jsonify({"success": False, "message": message}), 400
+                return jsonify(
+                    {"success": False, "message": message}
+                ), 400
+
             return render_template("login.html", error=message)
 
         if not validate_email(email):
+            message = "A valid email address is required."
+
             if request.is_json:
-                return jsonify({"success": False, "message": "A valid email address is required."}), 400
-            return render_template("login.html", error="A valid email address is required.")
+                return jsonify(
+                    {"success": False, "message": message}
+                ), 400
+
+            return render_template("login.html", error=message)
 
         if len(password) < 8:
+            message = "Password must be at least 8 characters long."
+
             if request.is_json:
-                return jsonify({"success": False, "message": "Password must be at least 8 characters long."}), 400
-            return render_template("login.html", error="Password must be at least 8 characters long.")
+                return jsonify(
+                    {"success": False, "message": message}
+                ), 400
+
+            return render_template("login.html", error=message)
 
         try:
-            teacher = app.teacher_store.register_teacher(name, username, email, password, department)
+            teacher = app.teacher_store.register_teacher(
+                name,
+                username,
+                email,
+                password,
+                department,
+            )
+
         except Exception:
-            logger.exception("Teacher registration could not reach the account database")
-            message = "Account storage is temporarily unavailable. Please retry in a moment."
+            logger.exception(
+                "Teacher registration could not reach the account database"
+            )
+
+            message = (
+                "Account storage is temporarily unavailable. "
+                "Please retry in a moment."
+            )
+
             if request.is_json:
-                return jsonify({"success": False, "error": "account_store_unavailable", "message": message}), 503
+                return (
+                    jsonify(
+                        {
+                            "success": False,
+                            "error": "account_store_unavailable",
+                            "message": message,
+                        }
+                    ),
+                    503,
+                )
+
             return render_template("login.html", error=message), 503
+
         if teacher is None:
-            message = "That email or username is already registered. Try signing in, or choose a different username."
+            message = (
+                "That email or username is already registered. "
+                "Try signing in, or choose a different username."
+            )
+
             if request.is_json:
-                return jsonify({"success": False, "message": message}), 409
+                return jsonify(
+                    {"success": False, "message": message}
+                ), 409
+
             return render_template("login.html", error=message)
 
         session.clear()
         session["teacher_id"] = teacher["id"]
+
         if request.is_json:
-            return jsonify({"success": True, "teacher": teacher})
+            return jsonify(
+                {
+                    "success": True,
+                    "teacher": teacher,
+                }
+            )
+
         return redirect(url_for("index"))
 
     @app.post("/api/auth/login")
     def login_teacher():
         raw = request.get_json(silent=True) or request.form or {}
-        identifier = str(raw.get("identifier", raw.get("email", raw.get("username", "")))).strip()
+
+        identifier = str(
+            raw.get(
+                "identifier",
+                raw.get("email", raw.get("username", "")),
+            )
+        ).strip()
+
         password = raw.get("password", "")
 
+        if not isinstance(password, str):
+            password = ""
+
         if not identifier or not password:
+            message = "Email or username and password are required."
+
             if request.is_json:
-                return jsonify({"success": False, "message": "Email or username and password are required."}), 400
-            return render_template("login.html", error="Email or username and password are required.")
+                return jsonify(
+                    {"success": False, "message": message}
+                ), 400
+
+            return render_template("login.html", error=message)
 
         try:
-            teacher = app.teacher_store.authenticate_teacher(identifier, password)
+            teacher = app.teacher_store.authenticate_teacher(
+                identifier,
+                password,
+            )
+
         except Exception:
-            logger.exception("Teacher login could not reach the account database")
-            message = "Account storage is temporarily unavailable. Your account was not checked; please retry in a moment."
+            logger.exception(
+                "Teacher login could not reach the account database"
+            )
+
+            message = (
+                "Account storage is temporarily unavailable. "
+                "Your account was not checked; please retry in a moment."
+            )
+
             if request.is_json:
-                return jsonify({"success": False, "error": "account_store_unavailable", "message": message}), 503
+                return (
+                    jsonify(
+                        {
+                            "success": False,
+                            "error": "account_store_unavailable",
+                            "message": message,
+                        }
+                    ),
+                    503,
+                )
+
             return render_template("login.html", error=message), 503
+
         if teacher is None:
+            message = (
+                "We couldn't match that email/username and password. "
+                "Check them and try again."
+            )
+
             if request.is_json:
-                return jsonify({"success": False, "message": "Invalid email/username or password."}), 401
-            return render_template("login.html", error="We couldn't match that email/username and password. Check them and try again.")
+                return (
+                    jsonify(
+                        {
+                            "success": False,
+                            "message": "Invalid email/username or password.",
+                        }
+                    ),
+                    401,
+                )
+
+            return render_template("login.html", error=message)
 
         session.clear()
         session["teacher_id"] = teacher["id"]
+
         if request.is_json:
-            return jsonify({"success": True, "teacher": teacher})
+            return jsonify(
+                {
+                    "success": True,
+                    "teacher": teacher,
+                }
+            )
+
         return redirect(url_for("index"))
+
+    @app.post("/api/auth/forgot-password")
+    def forgot_password():
+        # No email delivery provider is configured yet.
+        # Do not disclose whether an address belongs to an account.
+        message = (
+            "If this account exists, contact your institution's "
+            "ClassPulse administrator to reset its password."
+        )
+
+        if request.is_json:
+            return jsonify(
+                {
+                    "success": True,
+                    "message": message,
+                }
+            )
+
+        return render_template(
+            "login.html",
+            show_demo_credentials=not production,
+            notice=message,
+        )
 
     @app.post("/api/v1/auth/login")
     def mobile_login_teacher():
         payload = request.get_json(silent=True) or {}
-        identifier = str(payload.get("identifier", payload.get("email", payload.get("username", "")))).strip()
+
+        if not isinstance(payload, dict):
+            return jsonify(
+                {
+                    "success": False,
+                    "error": "validation_error",
+                    "message": "A JSON object is required.",
+                }
+            ), 400
+
+        identifier = str(
+            payload.get(
+                "identifier",
+                payload.get("email", payload.get("username", "")),
+            )
+        ).strip()
+
         password = payload.get("password", "")
+
+        if not isinstance(password, str):
+            password = ""
+
         if not identifier or not password:
-            return jsonify({"success": False, "error": "validation_error", "message": "Email or username and password are required."}), 400
+            return jsonify(
+                {
+                    "success": False,
+                    "error": "validation_error",
+                    "message": "Email or username and password are required.",
+                }
+            ), 400
+
         try:
-            teacher = app.teacher_store.authenticate_teacher(identifier, password)
+            teacher = app.teacher_store.authenticate_teacher(
+                identifier,
+                password,
+            )
+
         except Exception:
-            logger.exception("Mobile teacher login could not reach the account database")
-            return jsonify({"success": False, "error": "account_store_unavailable", "message": "Account storage is temporarily unavailable."}), 503
+            logger.exception(
+                "Mobile teacher login could not reach the account database"
+            )
+
+            return jsonify(
+                {
+                    "success": False,
+                    "error": "account_store_unavailable",
+                    "message": "Account storage is temporarily unavailable.",
+                }
+            ), 503
+
         if teacher is None:
-            return jsonify({"success": False, "error": "invalid_credentials", "message": "Invalid email/username or password."}), 401
-        token = mobile_token_signer.dumps({
-            "teacher_id": int(teacher["id"]),
-            "scan_session": secrets.token_urlsafe(16),
-        })
-        return jsonify({
-            "success": True,
-            "access_token": token,
-            "token_type": "Bearer",
-            "expires_in": mobile_token_ttl,
-            "teacher": teacher,
-        })
+            return jsonify(
+                {
+                    "success": False,
+                    "error": "invalid_credentials",
+                    "message": "Invalid email/username or password.",
+                }
+            ), 401
+
+        token = mobile_token_signer.dumps(
+            {
+                "teacher_id": int(teacher["id"]),
+                "scan_session": secrets.token_urlsafe(16),
+            }
+        )
+
+        return jsonify(
+            {
+                "success": True,
+                "access_token": token,
+                "token_type": "Bearer",
+                "expires_in": mobile_token_ttl,
+                "teacher": teacher,
+            }
+        )
 
     @app.post("/api/v1/auth/logout")
     def mobile_logout_teacher():
-        return jsonify({"success": True, "message": "Discard the bearer token on the device."})
+        return jsonify(
+            {
+                "success": True,
+                "message": "Discard the bearer token on the device.",
+            }
+        )
 
     @app.get("/api/auth/me")
     @app.get("/api/v1/auth/me")
     def get_authenticated_teacher_api():
         teacher = get_authenticated_teacher()
+
         if teacher is None:
-            return jsonify({"success": False, "teacher": None}), 401
-        return jsonify({"success": True, "teacher": teacher})
+            return jsonify(
+                {
+                    "success": False,
+                    "teacher": None,
+                }
+            ), 401
+
+        return jsonify(
+            {
+                "success": True,
+                "teacher": teacher,
+            }
+        )
 
     @app.post("/api/auth/logout")
     def logout_teacher():
         session.clear()
+
         return jsonify({"success": True})
 
     @app.get("/api/dashboard-config")
     @app.get("/api/v1/dashboard-config")
     def dashboard_config():
         teacher = get_authenticated_teacher()
-        teacher_payload = teacher or {"name": "Demo Teacher", "department": "Administration"}
+
+        teacher_payload = teacher or {
+            "name": "Demo Teacher",
+            "department": "Administration",
+        }
+
         return jsonify(
             {
                 "teacher": teacher_payload,
@@ -770,7 +1581,12 @@ def create_app():
                     "last_capture": "Not captured yet",
                     "camera_status": "Ready for live scan",
                     "student_count": 0,
-                    "recommended_action": "Start the classroom camera or capture a group photo for temporary, teacher-reviewed cues. Named records are saved only through the explicit opt-in workflow.",
+                    "recommended_action": (
+                        "Start the classroom camera or capture a group "
+                        "photo for temporary, teacher-reviewed cues. "
+                        "Named records are saved only through the "
+                        "explicit opt-in workflow."
+                    ),
                 },
                 "student_roster": [],
             }
@@ -779,8 +1595,11 @@ def create_app():
     @app.get("/api/telemetry")
     @app.get("/api/v1/telemetry")
     def get_telemetry():
-        teacher_id = int(get_authenticated_teacher()["id"])
+        teacher = get_authenticated_teacher()
+        teacher_id = int(teacher["id"])
+
         summary = app.telemetry_store.get_summary(teacher_id)
+
         return jsonify(
             {
                 "summary": summary,
@@ -791,27 +1610,56 @@ def create_app():
     @app.get("/api/students")
     @app.get("/api/v1/students")
     def get_students():
-        return jsonify({"students": app.telemetry_store.get_student_snapshot()})
+        return jsonify(
+            {
+                "students": app.telemetry_store.get_student_snapshot()
+            }
+        )
 
     @app.get("/api/student-scans")
     def get_student_scans():
         teacher = get_authenticated_teacher()
+
         if teacher is None:
-            return jsonify({"error": "Authentication required."}), 401
+            return jsonify(
+                {"error": "Authentication required."}
+            ), 401
+
         class_name = request.args.get("class", "").strip()
         roll_number = request.args.get("roll", "").strip()
-        scans = app.teacher_store.list_student_scans(int(teacher["id"]), class_name, roll_number)
+
+        scans = app.teacher_store.list_student_scans(
+            int(teacher["id"]),
+            class_name,
+            roll_number,
+        )
+
         return jsonify({"scans": scans})
 
     @app.get("/api/student-scans/<int:scan_id>/image")
     def get_student_scan_image(scan_id: int):
         teacher = get_authenticated_teacher()
+
         if teacher is None:
-            return jsonify({"error": "Authentication required."}), 401
-        image = app.teacher_store.get_student_scan_image(int(teacher["id"]), scan_id)
+            return jsonify(
+                {"error": "Authentication required."}
+            ), 401
+
+        image = app.teacher_store.get_student_scan_image(
+            int(teacher["id"]),
+            scan_id,
+        )
+
         if image is None:
-            return jsonify({"error": "Scan image not found."}), 404
-        return app.response_class(image[0], mimetype=image[1], headers={"Cache-Control": "private, no-store"})
+            return jsonify(
+                {"error": "Scan image not found."}
+            ), 404
+
+        return app.response_class(
+            image[0],
+            mimetype=image[1],
+            headers={"Cache-Control": "private, no-store"},
+        )
 
     @app.get("/api/alerts")
     @app.get("/api/v1/alerts")
@@ -822,30 +1670,69 @@ def create_app():
     @app.post("/api/v1/scan")
     def scan_face():
         payload = request.get_json(silent=True) or {}
+
         if not isinstance(payload, dict):
-            return jsonify({"error": "A JSON object is required.", "status": "invalid-request"}), 400
+            return jsonify(
+                {
+                    "error": "A JSON object is required.",
+                    "status": "invalid-request",
+                }
+            ), 400
+
         image_data = payload.get("image_data", "")
+
         if not isinstance(image_data, str):
-            return jsonify({"error": "image_data must be a base64 string.", "status": "invalid-image"}), 400
+            return jsonify(
+                {
+                    "error": "image_data must be a base64 string.",
+                    "status": "invalid-image",
+                }
+            ), 400
+
         identity = payload.get("student") or {}
+
         if not isinstance(identity, dict):
-            return jsonify({"error": "student must be an object.", "status": "invalid-student"}), 400
-        identity_values = [str(identity.get(key, "")).strip() for key in ("name", "class_name", "roll_number")]
+            return jsonify(
+                {
+                    "error": "student must be an object.",
+                    "status": "invalid-student",
+                }
+            ), 400
+
+        identity_values = [
+            str(identity.get(key, "")).strip()
+            for key in ("name", "class_name", "roll_number")
+        ]
+
         if any(identity_values) and not all(identity_values):
-            return jsonify({"error": "Student name, class, and roll number are all required to save a scan.", "status": "invalid-student"}), 400
+            return jsonify(
+                {
+                    "error": (
+                        "Student name, class, and roll number are "
+                        "all required to save a scan."
+                    ),
+                    "status": "invalid-student",
+                }
+            ), 400
+
         if not image_data:
-            return jsonify({
-                "attention": 0.0,
-                "fatigue": 1.0,
-                "status": "no-image",
-                "risk_level": "High",
-                "recommendation": "No face image was captured. Please allow the camera and retry the scan.",
-                "eye_engagement": 0.0,
-                "posture_score": 0.0,
-                "confidence": 0.0,
-                "overall_score": 0.0,
-                "face_detected": False,
-            }), 400
+            return jsonify(
+                {
+                    "attention": 0.0,
+                    "fatigue": 1.0,
+                    "status": "no-image",
+                    "risk_level": "High",
+                    "recommendation": (
+                        "No face image was captured. Please allow "
+                        "the camera and retry the scan."
+                    ),
+                    "eye_engagement": 0.0,
+                    "posture_score": 0.0,
+                    "confidence": 0.0,
+                    "overall_score": 0.0,
+                    "face_detected": False,
+                }
+            ), 400
 
         try:
             if image_data.startswith("data:image"):
@@ -853,126 +1740,335 @@ def create_app():
                 image_mime = image_header[5:].split(";", 1)[0]
             else:
                 image_mime = "image/jpeg"
-            if image_mime not in {"image/jpeg", "image/png", "image/webp"}:
-                return jsonify({"error": "Only JPEG, PNG, or WebP images can be saved.", "status": "invalid-image"}), 400
-            image_bytes = base64.b64decode(image_data, validate=True)
-            image_array = np.frombuffer(image_bytes, dtype=np.uint8)
-            frame = cv2.imdecode(image_array, cv2.IMREAD_COLOR)
+
+            if image_mime not in {
+                "image/jpeg",
+                "image/png",
+                "image/webp",
+            }:
+                return jsonify(
+                    {
+                        "error": "Only JPEG, PNG, or WebP images can be saved.",
+                        "status": "invalid-image",
+                    }
+                ), 400
+
+            image_bytes = base64.b64decode(
+                image_data,
+                validate=True,
+            )
+
+            image_array = np.frombuffer(
+                image_bytes,
+                dtype=np.uint8,
+            )
+
+            frame = cv2.imdecode(
+                image_array,
+                cv2.IMREAD_COLOR,
+            )
+
             if frame is None:
-                return jsonify({
-                    "attention": 0.0,
-                    "fatigue": 1.0,
-                    "status": "invalid-image",
-                    "risk_level": "High",
-                    "recommendation": "The image could not be read. Please retry with a clear face view.",
-                    "eye_engagement": 0.0,
-                    "posture_score": 0.0,
-                    "confidence": 0.0,
-                    "overall_score": 0.0,
-                    "face_detected": False,
-                }), 400
+                return jsonify(
+                    {
+                        "attention": 0.0,
+                        "fatigue": 1.0,
+                        "status": "invalid-image",
+                        "risk_level": "High",
+                        "recommendation": (
+                            "The image could not be read. Please retry "
+                            "with a clear face view."
+                        ),
+                        "eye_engagement": 0.0,
+                        "posture_score": 0.0,
+                        "confidence": 0.0,
+                        "overall_score": 0.0,
+                        "face_detected": False,
+                    }
+                ), 400
+
             if frame.shape[0] * frame.shape[1] > 12_000_000:
-                return jsonify({"error": "Image dimensions exceed the 12 megapixel limit.", "status": "invalid-image"}), 413
+                return jsonify(
+                    {
+                        "error": (
+                            "Image dimensions exceed the 12 megapixel limit."
+                        ),
+                        "status": "invalid-image",
+                    }
+                ), 413
 
             detection_settings = payload.get("detection_settings") or {}
+
+            if not isinstance(detection_settings, dict):
+                return jsonify(
+                    {
+                        "error": "detection_settings must be an object.",
+                        "status": "invalid-request",
+                    }
+                ), 400
+
             detection_mode = payload.get("detection_mode") or "multi-face"
-            # Browser scans run phone inference through a separate endpoint so
-            # its model latency cannot prevent face/fatigue scores from returning.
-            if request.path == "/api/scan" and payload.get("defer_phone_detection") is True:
-                detection_settings = {**detection_settings, "phone_detection": False}
-            scan_session = getattr(g, "mobile_scan_session", None) or session.setdefault("scan_session", secrets.token_urlsafe(12))
+
+            if not isinstance(detection_mode, str):
+                detection_mode = "multi-face"
+
+            if (
+                request.path == "/api/scan"
+                and payload.get("defer_phone_detection") is True
+            ):
+                detection_settings = {
+                    **detection_settings,
+                    "phone_detection": False,
+                }
+
+            scan_session = (
+                getattr(g, "mobile_scan_session", None)
+                or session.setdefault(
+                    "scan_session",
+                    secrets.token_urlsafe(12),
+                )
+            )
+
             analysis_frame = frame
             longest_side = max(frame.shape[:2])
+
             if longest_side > 960:
                 scale = 960 / longest_side
+
                 analysis_frame = cv2.resize(
                     frame,
-                    (round(frame.shape[1] * scale), round(frame.shape[0] * scale)),
+                    (
+                        round(frame.shape[1] * scale),
+                        round(frame.shape[0] * scale),
+                    ),
                     interpolation=cv2.INTER_AREA,
                 )
-            metrics = analyze_camera_frame(analysis_frame, detection_mode=detection_mode, detection_settings=detection_settings, scan_session=scan_session)
-            try:
-                app.telemetry_store.append(
-                    attention=metrics.get("attention", 0),
-                    fatigue=metrics.get("fatigue", 0),
-                    timestamp=payload.get("timestamp"),
-                    teacher_id=int(get_authenticated_teacher()["id"]),
-                    eye_engagement=metrics.get("eye_engagement", 0),
-                    posture_score=metrics.get("posture_score", 0),
-                )
-            except Exception:
-                logger.exception("Could not append scan telemetry; returning face scores")
+
+            metrics = analyze_camera_frame(
+                analysis_frame,
+                detection_mode=detection_mode,
+                detection_settings=detection_settings,
+                scan_session=scan_session,
+            )
+
             teacher = get_authenticated_teacher()
+
+            if teacher is not None:
+                try:
+                    app.telemetry_store.append(
+                        attention=metrics.get("attention", 0),
+                        fatigue=metrics.get("fatigue", 0),
+                        timestamp=payload.get("timestamp"),
+                        teacher_id=int(teacher["id"]),
+                        eye_engagement=metrics.get("eye_engagement", 0),
+                        posture_score=metrics.get("posture_score", 0),
+                    )
+
+                except Exception:
+                    logger.exception(
+                        "Could not append scan telemetry; returning face scores"
+                    )
+
             if teacher is not None and all(identity_values):
                 try:
-                    saved = app.teacher_store.save_student_scan(int(teacher["id"]), identity, image_bytes, metrics, image_mime)
-                    metrics["saved_scan"] = saved
-                except ValueError as exc:
-                    return jsonify({"error": str(exc), "status": "invalid-student"}), 400
-                except Exception:
-                    logger.exception("Could not save scan image; returning computed face scores")
-                    metrics["saved_scan_error"] = "Scan scores were calculated, but saving the image failed."
+                    saved = app.teacher_store.save_student_scan(
+                        int(teacher["id"]),
+                        identity,
+                        image_bytes,
+                        metrics,
+                        image_mime,
+                    )
 
-            return jsonify({"status": "ok", "frame_width": int(frame.shape[1]), "frame_height": int(frame.shape[0]), **metrics})
-        except Exception as exc:  # pragma: no cover - guard for invalid browser payloads
+                    metrics["saved_scan"] = saved
+
+                except ValueError as exc:
+                    return jsonify(
+                        {
+                            "error": str(exc),
+                            "status": "invalid-student",
+                        }
+                    ), 400
+
+                except Exception:
+                    logger.exception(
+                        "Could not save scan image; returning computed face scores"
+                    )
+
+                    metrics["saved_scan_error"] = (
+                        "Scan scores were calculated, but saving the image failed."
+                    )
+
+            return jsonify(
+                {
+                    "status": "ok",
+                    "frame_width": int(frame.shape[1]),
+                    "frame_height": int(frame.shape[0]),
+                    **metrics,
+                }
+            )
+
+        except Exception as exc:
             logger.exception("Scan request failed")
-            message = "Analysis could not complete. Check the image and camera, then try again."
+
+            message = (
+                "Analysis could not complete. Check the image and camera, "
+                "then try again."
+            )
+
             if not production:
-                message = f"Analysis failed: {type(exc).__name__}: {exc}"
-            return jsonify({
-                "status": "error",
-                "error": message,
-            }), 500
+                message = (
+                    f"Analysis failed: {type(exc).__name__}: {exc}"
+                )
+
+            return jsonify(
+                {
+                    "status": "error",
+                    "error": message,
+                }
+            ), 500
 
     @app.post("/api/phone-detect")
     def detect_phone_in_scan():
         payload = request.get_json(silent=True) or {}
-        image_data = payload.get("image_data", "") if isinstance(payload, dict) else ""
+
+        if not isinstance(payload, dict):
+            return jsonify(
+                {
+                    "error": "A JSON object is required.",
+                    "status": "invalid-request",
+                }
+            ), 400
+
+        image_data = payload.get("image_data", "")
+
         if not isinstance(image_data, str) or not image_data:
-            return jsonify({"error": "A captured image is required.", "status": "invalid-image"}), 400
+            return jsonify(
+                {
+                    "error": "A captured image is required.",
+                    "status": "invalid-image",
+                }
+            ), 400
+
         try:
             if image_data.startswith("data:image"):
                 header, encoded = image_data.split(",", 1)
                 mime = header[5:].split(";", 1)[0]
-                if mime not in {"image/jpeg", "image/png", "image/webp"}:
-                    return jsonify({"error": "Unsupported image type.", "status": "invalid-image"}), 400
+
+                if mime not in {
+                    "image/jpeg",
+                    "image/png",
+                    "image/webp",
+                }:
+                    return jsonify(
+                        {
+                            "error": "Unsupported image type.",
+                            "status": "invalid-image",
+                        }
+                    ), 400
             else:
                 encoded = image_data
-            image_bytes = base64.b64decode(encoded, validate=True)
-            frame = cv2.imdecode(np.frombuffer(image_bytes, dtype=np.uint8), cv2.IMREAD_COLOR)
+
+            image_bytes = base64.b64decode(
+                encoded,
+                validate=True,
+            )
+
+            frame = cv2.imdecode(
+                np.frombuffer(image_bytes, dtype=np.uint8),
+                cv2.IMREAD_COLOR,
+            )
+
             if frame is None:
-                return jsonify({"error": "The captured image could not be read.", "status": "invalid-image"}), 400
-            confidence = max(0.02, min(0.8, float(payload.get("confidence", 0.08))))
-            detections, detector_status = detect_phones(frame, confidence=confidence)
-            return jsonify({
-                "phone_detections": detections,
-                "phone_detection_status": detector_status,
-                "phone_alert": bool(detections),
-                "frame_width": int(frame.shape[1]),
-                "frame_height": int(frame.shape[0]),
-            })
+                return jsonify(
+                    {
+                        "error": "The captured image could not be read.",
+                        "status": "invalid-image",
+                    }
+                ), 400
+
+            if frame.shape[0] * frame.shape[1] > 12_000_000:
+                return jsonify(
+                    {
+                        "error": "Image dimensions exceed the 12 megapixel limit.",
+                        "status": "invalid-image",
+                    }
+                ), 413
+
+            try:
+                confidence = max(
+                    0.02,
+                    min(0.8, float(payload.get("confidence", 0.08))),
+                )
+
+            except (TypeError, ValueError):
+                confidence = 0.08
+
+            try:
+                detections, detector_status = detect_phones(
+                    frame,
+                    confidence=confidence,
+                )
+
+            except Exception:
+                logger.exception(
+                    "Standalone phone detection failed"
+                )
+
+                detections, detector_status = [], "error"
+
+            return jsonify(
+                {
+                    "phone_detections": detections,
+                    "phone_detection_status": detector_status,
+                    "phone_alert": bool(detections),
+                    "frame_width": int(frame.shape[1]),
+                    "frame_height": int(frame.shape[0]),
+                }
+            )
+
         except Exception:
-            logger.exception("Standalone phone detection failed")
-            return jsonify({
-                "error": "Phone detection is temporarily unavailable.",
-                "status": "error",
-                "phone_detections": [],
-                "phone_detection_status": "error",
-                "phone_alert": False,
-            }), 200
+            logger.exception(
+                "Could not prepare standalone phone detection"
+            )
+
+            return jsonify(
+                {
+                    "error": "Phone detection is temporarily unavailable.",
+                    "status": "error",
+                    "phone_detections": [],
+                    "phone_detection_status": "error",
+                    "phone_alert": False,
+                }
+            ), 200
 
     @app.post("/api/telemetry")
     @app.post("/api/v1/telemetry")
     def receive_telemetry():
         payload = request.get_json(silent=True) or {}
+
+        if not isinstance(payload, dict):
+            return jsonify(
+                {
+                    "error": "A JSON object is required."
+                }
+            ), 400
+
+        teacher = get_authenticated_teacher()
+
         app.telemetry_store.append(
             attention=payload.get("attention", 0),
             fatigue=payload.get("fatigue", 0),
             timestamp=payload.get("timestamp"),
-            teacher_id=int(get_authenticated_teacher()["id"]),
+            teacher_id=int(teacher["id"]),
             eye_engagement=payload.get("eye_engagement", 0),
             posture_score=payload.get("posture_score", 0),
         )
-        return jsonify({"received": True, "payload": payload})
+
+        return jsonify(
+            {
+                "received": True,
+                "payload": payload,
+            }
+        )
 
     return app

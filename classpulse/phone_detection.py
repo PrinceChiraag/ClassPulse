@@ -8,6 +8,7 @@ import os
 import logging
 import threading
 import time
+from pathlib import Path
 
 import cv2
 
@@ -34,7 +35,13 @@ def _get_model():
         try:
             from ultralytics import YOLO
 
-            weights = os.getenv("CLASSPULSE_PHONE_MODEL", "yolo11n.pt")
+            custom_weights = Path(os.getenv("CLASSPULSE_PHONE_MODEL", "models/phone_best.pt"))
+            bundled_weights = Path("yolo11n.pt")
+            # Prefer a locally trained phone-specific checkpoint. Fall back to
+            # the bundled COCO checkpoint, which includes class 67: cell phone.
+            weights = custom_weights if custom_weights.is_file() else bundled_weights
+            if not custom_weights.is_file() and os.getenv("CLASSPULSE_PHONE_MODEL"):
+                logger.warning("Configured phone model %s is missing; trying bundled %s", custom_weights, bundled_weights)
             _model = YOLO(weights)
             _model_error = None
             _model_status = None

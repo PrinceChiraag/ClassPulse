@@ -1,3 +1,4 @@
+
 .git
 .venv
 venv
@@ -13,10 +14,14 @@ __pycache__
 certs
 classpulse/data
 datasets
+models
+!models/
+models/*
+training
 tests
-docs
 *.py[cod]
 *.log
 runs
 *.pt
 !yolo11n.pt
+!models/phone_best.pt

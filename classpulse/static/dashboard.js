@@ -1159,7 +1159,7 @@ async function analyzePhoneImage(imageData, scanSequence) {
         });
         const result = await response.json().catch(() => ({}));
         if (scanSequence !== phoneScanSequence) return;
-        if (!response.ok && !result.phone_detection_status) {
+        if (!response.ok || !result.phone_detection_status) {
             result.phone_detection_status = "error";
         }
         renderPhoneDetections(result);

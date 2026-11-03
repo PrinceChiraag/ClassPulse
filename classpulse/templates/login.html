@@ -307,6 +307,17 @@
             box-shadow: none;
         }
         .auth-form h2 { color: #41382f; }
+        .brand { align-items: flex-start; }
+        .brand h1 { letter-spacing: .04em; text-transform: uppercase; }
+        .hero { background-image: linear-gradient(145deg, rgba(23,56,62,.95), rgba(19,44,51,.8)), url('/static/icons/icon-512.png'); background-size: cover, 280px; background-position: center, right 28px bottom 24px; background-repeat: no-repeat; }
+        .auth-panel-title { margin: 2px 2px 18px; }
+        .auth-panel-title h2 { margin: 0 0 5px; font-size: 1.65rem; }
+        .auth-panel-title p { margin: 0; color: #817568; font-size: .9rem; }
+        .auth-form[hidden] { display: none; }
+        .auth-switch { display:flex; justify-content:center; align-items:center; gap:8px; margin: 2px 0 0; color:#817568; font-size:.9rem; }
+        .auth-switch button, .text-button { width:auto; padding:4px; background:transparent; box-shadow:none; color:#51705a; text-decoration:underline; }
+        .auth-links { display:flex; justify-content:flex-end; margin-top:-8px; }
+        .notice { margin:0 0 14px; padding:11px 13px; border:1px solid #c9ddce; border-radius:10px; color:#42684c; background:#f1f8f1; font-size:.9rem; line-height:1.5; }
         input { background: #fffaf2; color: #41382f; }
         input:focus { outline-color: rgba(113,130,84,.2); border-color: #a9b38d; }
         button {
@@ -318,6 +329,12 @@
         .error { color: #9c3939; background: #fff1ef; border-color: #f1d5d0; }
         .form-note { margin: -8px 0 0; color: #76887f; font-size: .78rem; line-height: 1.5; }
         .auth-form button { min-height: 48px; }
+        @media (min-width: 901px) {
+            .auth-shell { min-height: 690px; }
+            .hero { padding: 54px 46px; }
+            .hero-copy { margin: auto 0; }
+            .panel { display:flex; flex-direction:column; justify-content:center; padding:48px 34px; }
+        }
         @media (max-width: 600px) {
             body { display: block; min-height: 100svh; padding: 68px 12px 16px; }
             .login-theme-toggle { top: 12px; right: 12px; }
@@ -355,26 +372,9 @@
         :root[data-theme="dark"] input { color: #eee9dd; background: #20241e; border-color: #41473b; }
         :root[data-theme="dark"] .demo-card { color: #c9c1b1; background: #2d3327; }
         :root[data-theme="dark"] .login-theme-toggle { color: #e1dac9; background: #2b3027; border-color: #444a3e; }
-        @media (max-width: 600px) {
-            body { display: block; min-height: 100svh; padding: 68px 12px 16px; }
-            .login-theme-toggle { top: 12px; right: 12px; }
-            .auth-shell { width: 100%; border-radius: 20px; }
-            .hero { padding: 21px 18px; }
-            .brand { margin-bottom: 18px; }
-            .brand-mark { width: 44px; height: 44px; }
-            .hero-copy h2 { font-size: 1.8rem; }
-            .hero-copy p { font-size: .9rem; line-height: 1.55; }
-            .feature-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 7px; margin-top: 16px; }
-            .feature { padding: 10px 8px; border-radius: 12px; }
-            .feature strong { margin-bottom: 4px; font-size: .9rem; }
-            .feature span { font-size: .68rem; }
-            .demo-card { font-size: .78rem; }
-            .panel { padding: 16px 12px; }
-            .auth-stack { gap: 12px; }
-            .auth-form { gap: 12px; padding: 16px 13px; border-radius: 15px; }
-            input { min-height: 48px; }
-        }
-        @media (max-width: 360px) { .feature-grid { grid-template-columns: 1fr; } }
+        :root[data-theme="dark"] .auth-panel-title p, :root[data-theme="dark"] .auth-switch { color:#b4ad9e; }
+        :root[data-theme="dark"] .auth-switch button, :root[data-theme="dark"] .text-button { color:#c4d99c; }
+        :root[data-theme="dark"] .notice { color:#c7e3cb; background:#263629; border-color:#405b44; }
     </style>
 </head>
 <body>
@@ -422,12 +422,14 @@
         </section>
 
         <aside class="panel">
+            <div class="auth-panel-title"><h2>Welcome back</h2><p>Sign in to your ClassPulse teacher workspace.</p></div>
             {% if error %}
                 <div class="error">{{ error }}</div>
             {% endif %}
+            {% if notice %}<div class="notice" role="status">{{ notice }}</div>{% endif %}
 
             <div class="auth-stack">
-                <form method="POST" action="/api/auth/login" class="auth-form">
+                <form id="login-form" method="POST" action="/api/auth/login" class="auth-form">
                     <h2>Login</h2>
                     <p class="form-note">Sign in with the email address or username you registered.</p>
                     <label>
@@ -440,11 +442,15 @@
                         <input type="password" name="password" placeholder="Enter your password" autocomplete="current-password" required />
                     </label>
 
+                    <div class="auth-links"><button class="text-button" type="button" data-auth-view="forgot">Forgot password?</button></div>
+
                     <button type="submit">Login as teacher</button>
+                    <p class="auth-switch">New to ClassPulse? <button type="button" data-auth-view="register">Create an account</button></p>
                 </form>
 
-                <form method="POST" action="/api/auth/register" class="auth-form">
+                <form id="register-form" method="POST" action="/api/auth/register" class="auth-form" hidden>
                     <h2>Create account</h2>
+                    <p class="form-note">Set up your teacher account to get started.</p>
                     <label>
                         Teacher name
                         <input type="text" name="name" placeholder="Enter full name" autocomplete="name" required />
@@ -472,12 +478,34 @@
                     </label>
 
                     <button type="submit">Register as teacher</button>
+                    <p class="auth-switch">Already have an account? <button type="button" data-auth-view="login">Sign in</button></p>
+                </form>
+
+                <form id="forgot-form" method="POST" action="/api/auth/forgot-password" class="auth-form" hidden>
+                    <h2>Recover your account</h2>
+                    <p class="form-note">Enter your account email for recovery instructions.</p>
+                    <label>Email address<input type="email" name="email" placeholder="you@school.edu" autocomplete="email" required /></label>
+                    <button type="submit">Continue</button>
+                    <p class="auth-switch"><button type="button" data-auth-view="login">Back to login</button></p>
                 </form>
             </div>
 
             {% if show_demo_credentials %}<div class="hint">Local demo account: teacher@classpulse.com / Teacher@123</div>{% endif %}
         </aside>
     </div>
+    <script>
+        const authForms = { login: document.getElementById('login-form'), register: document.getElementById('register-form'), forgot: document.getElementById('forgot-form') };
+        document.querySelectorAll('[data-auth-view]').forEach((button) => button.addEventListener('click', () => {
+            const view = button.dataset.authView;
+            Object.entries(authForms).forEach(([name, form]) => { form.hidden = name !== view; });
+            document.querySelector('.auth-panel-title h2').textContent = view === 'register' ? 'Join ClassPulse' : view === 'forgot' ? 'Account recovery' : 'Welcome back';
+            document.querySelector('.auth-panel-title p').textContent = view === 'register' ? 'Create your teacher workspace in a few steps.' : view === 'forgot' ? 'Get help recovering access to your account.' : 'Sign in to your ClassPulse teacher workspace.';
+        }));
+        if ({{ 'true' if error else 'false' }}) {
+            const registerError = /username|teacher name|department|already registered/i.test({{ error|default('', true)|tojson }});
+            if (registerError) document.querySelector('[data-auth-view="register"]').click();
+        }
+    </script>
     <script src="/static/theme.js"></script>
 </body>
 </html>

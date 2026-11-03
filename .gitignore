@@ -1,18 +1,79 @@
+
+# ==========================================
+# Environment and secrets
+# ==========================================
 .env
 .env.*
 !.env.example
+
+# ==========================================
+# Python virtual environments
+# ==========================================
 .venv/
 venv/
+env/
+
+# ==========================================
+# Python cache and temporary files
+# ==========================================
 __pycache__/
 **/__pycache__/
+*.py[cod]
+*.log
 .pytest_cache/
 .pipcache/
+
+# ==========================================
+# IDE and editor files
+# ==========================================
 .continue/
 .vscode/
+.idea/
+
+# ==========================================
+# Certificates and private keys
+# ==========================================
 certs/
+*.pem
+*.key
+
+# ==========================================
+# Local databases
+# ==========================================
 classpulse/data/*.db
-classpulse/data/*.sqlite*
-datasets/*
-!datasets/phone/data.example.yaml
+classpulse/data/*.sqlite
+classpulse/data/*.sqlite3
+
+# ==========================================
+# Phone detection datasets
+# Keep all datasets local (not on GitHub)
+# ==========================================
+datasets/
+
+# ==========================================
+# Model files
+# Exclude other models but keep deployment model
+# ==========================================
+models/*.pt
+!models/phone_best.pt
+
+# ==========================================
+# Training outputs
+# ==========================================
 runs/
-*.log
+wandb/
+mlruns/
+
+# ==========================================
+# Build and distribution files
+# ==========================================
+build/
+dist/
+*.egg-info/
+
+# ==========================================
+# Operating system files
+# ==========================================
+.DS_Store
+Thumbs.db
+desktop.ini

@@ -1,8 +1,9 @@
+
 FROM python:3.12-slim
 
 WORKDIR /app
 
-# Install system dependencies required for OpenCV headless, MediaPipe, and PostgreSQL compilation
+# System dependencies for OpenCV, MediaPipe and PostgreSQL
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libglib2.0-0 \
     libgl1 \
@@ -11,21 +12,29 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc \
     && rm -rf /var/lib/apt/lists/*
 
-# Install Python requirements
+# Install Python dependencies
 COPY requirements.txt ./
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy source repository
+# Copy application source and required model files
 COPY . .
 
-# Verification check to confirm YOLO model loads properly
-RUN python -c "from ultralytics import YOLO; model = YOLO('/app/yolo11n.pt'); assert any('phone' in str(name).lower() for name in model.names.values()), 'Bundled model has no phone class'"
+# Verify both YOLO models load correctly
+RUN python -c "from ultralytics import YOLO; \
+general = YOLO('/app/yolo11n.pt'); \
+phone = YOLO('/app/models/phone_best.pt'); \
+assert any('person' in str(n).lower() for n in general.names.values()), 'Person class missing'; \
+assert any('phone' == str(n).lower() for n in phone.names.values()), 'Phone class missing'; \
+print('Both models loaded successfully')"
 
-# Expose Render default port
+# Production configuration
 ENV HOST=0.0.0.0
 ENV PORT=10000
+ENV FLASK_DEBUG=0
+ENV APP_ENV=production
+ENV CLASSPULSE_PHONE_MODEL=/app/models/phone_best.pt
 
 EXPOSE 10000
 
-# Keep worker alive with Gunicorn on 0.0.0.0:10000
+# Start Flask through Gunicorn
 CMD ["gunicorn", "--bind", "0.0.0.0:10000", "--workers", "1", "--threads", "4", "--timeout", "120", "wsgi:app"]

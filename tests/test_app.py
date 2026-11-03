@@ -109,6 +109,33 @@ def test_login_page_exposes_teacher_registration_form():
     assert "teacher name" in html
     assert 'name="username"' in html
     assert "email or username" in html
+    assert "forgot password?" in html
+    assert "classpulse" in html
+    assert 'id="register-form"' in html
+
+
+def test_forgot_password_request_is_private_and_actionable():
+    client = app.test_client()
+    response = client.post("/api/auth/forgot-password", data={"email": "unknown@example.com"})
+
+    assert response.status_code == 200
+    html = response.get_data(as_text=True).lower()
+    assert "if this account exists" in html
+    assert "administrator" in html
+
+
+def test_phone_endpoint_keeps_optional_detection_failure_nonfatal(monkeypatch):
+    client = authenticated_client()
+    monkeypatch.setattr(backend, "detect_phones", lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("model failed")))
+    ok, encoded = cv2.imencode(".jpg", np.zeros((120, 120, 3), dtype=np.uint8))
+    assert ok
+    image_data = "data:image/jpeg;base64," + base64.b64encode(encoded.tobytes()).decode("ascii")
+
+    response = client.post("/api/phone-detect", json={"image_data": image_data, "confidence": "invalid"})
+
+    assert response.status_code == 200
+    assert response.get_json()["phone_detection_status"] == "error"
+    assert response.get_json()["phone_detections"] == []
 
 
 def test_dashboard_config_includes_camera_and_threshold_controls():
