@@ -89,7 +89,7 @@
                 </div>
                 <div class="guide-tip">
                     <strong>Camera access:</strong>
-                    <span>Phone objects are highlighted during each scan. A visible phone does not prove use; check the scene before acting on a warning.</span>
+                    <span>The captured image is checked for supported objects and faces. Review detections in context.</span>
                 </div>
             </section>
 
@@ -148,9 +148,9 @@
                         <div class="camera-overlay">
                             <span id="camera-context">Session feed</span>
                         </div>
-                        <div id="phone-detection-status" class="phone-detection-status" aria-live="polite">Phone detector loading</div>
+                        <div id="phone-detection-status" class="phone-detection-status" aria-live="polite">Object detector loading</div>
                         <div id="scan-progress-overlay" class="scan-progress-overlay" role="status" aria-live="polite" hidden>
-                            <div class="scan-progress-card"><span class="scan-progress-spinner" aria-hidden="true"></span><strong>Image captured - analyzing</strong><span>Checking face, fatigue cues, and phone objects</span></div>
+                            <div class="scan-progress-card"><span class="scan-progress-spinner" aria-hidden="true"></span><strong>Image captured - analyzing</strong><span>Checking faces, fatigue cues, and supported objects</span></div>
                         </div>
                     </div>
                     <div id="phone-scan-alert" class="phone-scan-alert" role="alert" aria-live="assertive" hidden></div>
@@ -166,14 +166,14 @@
                         <button id="privacy-wireframe-toggle" class="secondary-button" type="button">Show scan guide</button>
                     </div>
                     <div class="student-identity-form">
-                        <h3>Save this scan to a student record</h3>
-                        <p>The image and derived metrics are retained only if you enable the save option and provide the student's details. Apply your institution's consent and retention rules.</p>
+                        <h3>Save this image and its scores</h3>
+                        <p>Enable saving to retain the captured image, face scores, and object detections. Student details are optional.</p>
                         <div class="student-identity-fields">
                             <label>Student name<input id="student-name" autocomplete="off" maxlength="100" placeholder="Full name" /></label>
                             <label>Class<input id="student-class" autocomplete="off" maxlength="50" placeholder="e.g. 8A" /></label>
                             <label>Roll number<input id="student-roll" autocomplete="off" maxlength="30" placeholder="e.g. 14" /></label>
                         </div>
-                        <label class="privacy-consent"><input id="save-student-scan" type="checkbox" /> I have permission to retain this image and its derived metrics for this student</label>
+                        <label class="privacy-consent"><input id="save-student-scan" type="checkbox" /> Save this image and its analysis results</label>
                     </div>
                     <div class="photo-panel" id="photo-panel" style="display:none; margin-top:16px;">
                         <div class="photo-head">
@@ -220,15 +220,6 @@
                 </div>
             </section>
 
-            <section id="student-scan-history" class="panel detail-panel scan-history-panel">
-                <div class="panel-header"><h2>Saved student scans</h2><button id="refresh-student-scans" class="secondary-button" type="button">Refresh history</button></div>
-                <div class="student-scan-filters">
-                    <label>Filter by class<input id="scan-filter-class" placeholder="Any class" /></label>
-                    <label>Filter by roll number<input id="scan-filter-roll" placeholder="Any roll number" /></label>
-                </div>
-                <div id="student-scan-history-list" class="student-scan-history"><p class="empty-state">No saved scans yet.</p></div>
-            </section>
-
             <section class="bottom-grid">
                 <div class="panel roster-panel">
                     <div class="panel-header"><h2>Student roster</h2></div>
@@ -251,6 +242,20 @@
                     </thead>
                     <tbody id="history-body"></tbody>
                 </table>
+            </section>
+
+            <section id="student-scan-history" class="panel detail-panel scan-history-panel">
+                <div class="panel-header"><h2>Saved image results</h2><div class="scan-history-actions"><button id="toggle-saved-results" class="secondary-button" type="button" aria-expanded="false">Show stored results</button><button id="refresh-student-scans" class="secondary-button" type="button">Refresh</button></div></div>
+                <div class="student-scan-filters">
+                    <label>Filter by class<input id="scan-filter-class" placeholder="Any class" /></label>
+                    <label>Filter by roll number<input id="scan-filter-roll" placeholder="Any roll number" /></label>
+                </div>
+                <div id="student-scan-history-list" class="saved-results-wrap" hidden>
+                    <table class="saved-results-table">
+                        <thead><tr><th>Image</th><th>Record</th><th>Overall scores</th><th>Faces and scores</th><th>Objects</th><th>Saved</th></tr></thead>
+                        <tbody><tr><td colspan="6" class="empty-state">No saved scans yet.</td></tr></tbody>
+                    </table>
+                </div>
             </section>
         </main>
     </div>

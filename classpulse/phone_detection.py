@@ -1,152 +1,367 @@
-"""Phone object detection for live camera scans.
+"""Lazy, CPU-only YOLO inference for captured ClassPulse frames."""
 
-Uses a COCO-pretrained YOLO model by default. Set CLASSPULSE_PHONE_MODEL to a
-fine-tuned weights file to use a custom classroom model.
-"""
-
-import os
 import logging
+import math
+import os
 import threading
 import time
 from pathlib import Path
 
-import cv2
 
+_PROJECT_ROOT = Path(__file__).resolve().parents[1]
+_DEFAULT_PHONE_MODEL = _PROJECT_ROOT / "models" / "phone_best.pt"
+_GENERAL_MODEL = _PROJECT_ROOT / "yolo11n.pt"
+_PHONE_LABELS = {
+    "phone",
+    "smartphone",
+    "cell phone",
+    "mobile phone",
+    "handset",
+    "cellular phone",
+}
 
 _model = None
+_model_path = None
 _model_error = None
-_retry_after = 0.0
 _model_status = None
+_retry_after = 0.0
+_general_model = None
+_general_model_error = None
+_general_model_status = None
+_general_retry_after = 0.0
 _model_lock = threading.Lock()
 logger = logging.getLogger(__name__)
 
 
+def _resolve_model_path():
+    configured = os.getenv("CLASSPULSE_PHONE_MODEL", "").strip()
+    if configured:
+        path = Path(configured).expanduser()
+        if not path.is_absolute():
+            path = _PROJECT_ROOT / path
+        return path.resolve(), True
+
+    if _DEFAULT_PHONE_MODEL.is_file():
+        return _DEFAULT_PHONE_MODEL, False
+    return _GENERAL_MODEL, False
+
+
+def _normalize_names(names):
+    if isinstance(names, (list, tuple)):
+        names = dict(enumerate(names))
+    return {int(class_id): str(label).strip() for class_id, label in (names or {}).items()}
+
+
+def phone_class_ids(model):
+    """Find phone classes by label; never infer a class from its numeric ID."""
+    return [
+        class_id
+        for class_id, label in _normalize_names(getattr(model, "names", {})).items()
+        if is_phone_label(label)
+    ]
+
+
+def is_phone_label(label):
+    return str(label or "").strip().casefold() in _PHONE_LABELS
+
+
 def _get_model():
-    global _model, _model_error, _model_status, _retry_after
+    """Load one selected model per process and report load failures explicitly."""
+    global _model, _model_path, _model_error, _model_status, _retry_after
     if _model is not None:
         return _model
     if _model_error is not None and time.monotonic() < _retry_after:
         return None
+
     with _model_lock:
         if _model is not None:
             return _model
         if _model_error is not None and time.monotonic() < _retry_after:
             return None
+
+        path, explicit = _resolve_model_path()
+        logger.info("Loading YOLO detector from %s (exists=%s)", path, path.is_file())
+        if not path.is_file():
+            _model_status = "model-not-found"
+            _model_error = f"Model file does not exist: {path}"
+            _retry_after = time.monotonic() + 60.0
+            if explicit:
+                logger.error("Configured phone model is missing: %s", path)
+                return None
+            if path != _GENERAL_MODEL and _GENERAL_MODEL.is_file():
+                logger.warning("Default phone model is missing; falling back to COCO model %s", _GENERAL_MODEL)
+                path = _GENERAL_MODEL
+            else:
+                logger.error("No YOLO model file is available at %s", path)
+                return None
+
         try:
             from ultralytics import YOLO
 
-            custom_weights = Path(os.getenv("CLASSPULSE_PHONE_MODEL", "models/phone_best.pt"))
-            bundled_weights = Path("yolo11n.pt")
-            # Prefer a locally trained phone-specific checkpoint. Fall back to
-            # the bundled COCO checkpoint, which includes class 67: cell phone.
-            weights = custom_weights if custom_weights.is_file() else bundled_weights
-            if not custom_weights.is_file() and os.getenv("CLASSPULSE_PHONE_MODEL"):
-                logger.warning("Configured phone model %s is missing; trying bundled %s", custom_weights, bundled_weights)
-            _model = YOLO(weights)
+            loaded_model = YOLO(str(path), task="detect")
+            names = _normalize_names(getattr(loaded_model, "names", {}))
+            if not names:
+                raise RuntimeError(f"YOLO model at {path} has no class names")
+
+            _model = loaded_model
+            _model_path = path
             _model_error = None
-            _model_status = None
-        except Exception as exc:  # optional dependency / model download failure
+            _model_status = "ready"
+            _retry_after = 0.0
+            logger.info(
+                "YOLO detector loaded on demand from %s; classes=%s; phone_class_ids=%s",
+                path,
+                names,
+                phone_class_ids(loaded_model),
+            )
+            return _model
+        except Exception as exc:
+            _model = None
+            _model_path = path
             _model_error = f"{type(exc).__name__}: {exc}"
-            if isinstance(exc, ModuleNotFoundError) and exc.name == "ultralytics":
-                _model_status = "not-installed"
-            elif isinstance(exc, FileNotFoundError):
-                _model_status = "model-not-found"
-            else:
-                _model_status = "load-error"
+            _model_status = (
+                "not-installed"
+                if isinstance(exc, ModuleNotFoundError) and exc.name == "ultralytics"
+                else "model-not-found"
+                if isinstance(exc, FileNotFoundError)
+                else "load-error"
+            )
             _retry_after = time.monotonic() + 60.0
-            logger.exception("Phone detector model failed to load from %s", os.getenv("CLASSPULSE_PHONE_MODEL", "yolo11n.pt"))
-    return _model
-
-
-def _phone_class_ids(model):
-    names = model.names
-    if isinstance(names, list):
-        names = dict(enumerate(names))
-    accepted = ("phone", "smartphone", "cell phone", "mobile phone", "handset", "cellular phone")
-    return [int(class_id) for class_id, name in names.items() if any(term in str(name).lower() for term in accepted)]
+            logger.exception("YOLO model loading failed for %s", path)
+            return None
 
 
 def phone_detector_runtime_status():
-    """Describe detector state without loading its heavyweight runtime."""
-    model = _model
-    if model is None:
+    """Return detector status without forcing heavyweight model loading."""
+    if _model is None:
         return _model_status or "not-loaded"
-    if _phone_class_ids(model):
+    return "ready" if phone_class_ids(_model) else "no-phone-class"
+
+
+def object_detector_runtime_status():
+    """Report general object detector state without forcing model loading."""
+    if _general_model is not None or (_model is not None and _model_path == _GENERAL_MODEL):
         return "ready"
-    names = model.names if isinstance(model.names, dict) else dict(enumerate(model.names))
-    return "ready" if str(names.get(67, "")).lower() == "cell phone" else "no-phone-class"
+    return _general_model_status or "not-loaded"
 
 
-def detect_phones(frame, confidence=0.12):
-    """Return room-level phone boxes. Images are evaluated in memory only."""
+def _get_general_model():
+    """Load the bundled COCO detector once for non-phone object classes."""
+    global _general_model, _general_model_error, _general_model_status, _general_retry_after
+    if _model is not None and _model_path == _GENERAL_MODEL:
+        return _model
+    if _general_model is not None:
+        return _general_model
+    if _general_model_error is not None and time.monotonic() < _general_retry_after:
+        return None
+
+    with _model_lock:
+        if _model is not None and _model_path == _GENERAL_MODEL:
+            return _model
+        if _general_model is not None:
+            return _general_model
+        if _general_model_error is not None and time.monotonic() < _general_retry_after:
+            return None
+        logger.info("Loading general YOLO object detector from %s (exists=%s)", _GENERAL_MODEL, _GENERAL_MODEL.is_file())
+        if not _GENERAL_MODEL.is_file():
+            _general_model_status = "model-not-found"
+            _general_model_error = f"Model file does not exist: {_GENERAL_MODEL}"
+            _general_retry_after = time.monotonic() + 60.0
+            logger.error("General YOLO model is missing: %s", _GENERAL_MODEL)
+            return None
+        try:
+            from ultralytics import YOLO
+
+            model = YOLO(str(_GENERAL_MODEL), task="detect")
+            names = _normalize_names(getattr(model, "names", {}))
+            if not names:
+                raise RuntimeError(f"YOLO model at {_GENERAL_MODEL} has no class names")
+            _general_model = model
+            _general_model_error = None
+            _general_model_status = "ready"
+            _general_retry_after = 0.0
+            logger.info("General YOLO detector loaded from %s; classes=%s", _GENERAL_MODEL, names)
+            return _general_model
+        except Exception as exc:
+            _general_model = None
+            _general_model_error = f"{type(exc).__name__}: {exc}"
+            _general_model_status = "not-installed" if isinstance(exc, ModuleNotFoundError) and exc.name == "ultralytics" else "load-error"
+            _general_retry_after = time.monotonic() + 60.0
+            logger.exception("General YOLO model loading failed for %s", _GENERAL_MODEL)
+            return None
+
+
+def _valid_frame(frame):
+    return (
+        frame is not None
+        and getattr(frame, "ndim", 0) == 3
+        and frame.shape[0] > 0
+        and frame.shape[1] > 0
+        and frame.shape[2] == 3
+    )
+
+
+def _normalize_confidence(confidence):
+    try:
+        value = float(confidence)
+    except (TypeError, ValueError):
+        value = 0.25
+    if not math.isfinite(value):
+        value = 0.25
+    return max(0.10, min(0.8, value))
+
+
+def detect_objects(frame, confidence=0.25):
+    """Combine the tuned phone detector with general COCO object detections."""
+    if not _valid_frame(frame):
+        logger.warning("Object inference rejected an invalid frame")
+        return [], "invalid-frame"
+    threshold = _normalize_confidence(confidence)
+    height, width = frame.shape[:2]
+    started = time.monotonic()
+    phone_detections, phone_status = detect_phones(frame, confidence=threshold)
+    general_model = _get_general_model()
+    general_detections = []
+    general_inference_status = _general_model_status or "unavailable"
+
+    if general_model is not None:
+        try:
+            with _model_lock:
+                result = general_model.predict(
+                    source=frame,
+                    conf=threshold,
+                    imgsz=640,
+                    device="cpu",
+                    verbose=False,
+                )[0]
+            general_detections = _read_result(result)
+            general_inference_status = "ready"
+            logger.info(
+                "General YOLO inference completed: model=%s frame=%sx%s detections=%s duration_ms=%s",
+                _GENERAL_MODEL,
+                width,
+                height,
+                len(general_detections),
+                round((time.monotonic() - started) * 1000),
+            )
+        except Exception:
+            general_inference_status = "error"
+            logger.exception(
+                "General YOLO inference failed: model=%s frame=%sx%s confidence=%.3f",
+                _GENERAL_MODEL,
+                width,
+                height,
+                threshold,
+            )
+
+    # The custom phone model is more specific. Use COCO phone labels only if
+    # that model is unavailable; all other COCO classes remain visible.
+    general_phones = [item for item in general_detections if is_phone_label(item["label"])]
+    other_objects = [item for item in general_detections if not is_phone_label(item["label"])]
+    if phone_status == "ready":
+        detections = phone_detections + other_objects
+    else:
+        detections = general_detections
+
+    if phone_status == "ready" and general_inference_status == "ready":
+        status = "ready"
+    elif phone_status == "ready" or general_inference_status == "ready":
+        status = "partial"
+    else:
+        status = phone_status if phone_status not in {"not-loaded", "unavailable"} else general_inference_status
+
+    logger.info(
+        "YOLO combined scan completed: frame=%sx%s objects=%s phones=%s phone_model=%s general_model=%s",
+        width,
+        height,
+        len(detections),
+        len(phone_detections) if phone_status == "ready" else len(general_phones),
+        phone_status,
+        general_inference_status,
+    )
+    return detections, status
+
+
+def detect_phones(frame, confidence=0.25):
+    """Return detections only for class labels that explicitly identify phones."""
+    if not _valid_frame(frame):
+        logger.warning("Phone inference rejected an invalid frame")
+        return [], "invalid-frame"
+
     model = _get_model()
     if model is None:
-        detections = _fallback_phone_scan(frame)
-        return detections, "fallback" if detections else (_model_status or "unavailable")
+        return [], _model_status or "unavailable"
 
+    class_ids = phone_class_ids(model)
+    if not class_ids:
+        logger.error(
+            "Loaded model %s has no recognized phone class; classes=%s",
+            _model_path,
+            _normalize_names(getattr(model, "names", {})),
+        )
+        return [], "no-phone-class"
+
+    threshold = _normalize_confidence(confidence)
+    height, width = frame.shape[:2]
+    started = time.monotonic()
     try:
-        class_ids = _phone_class_ids(model)
-        if not class_ids:
-            # COCO calls this class "cell phone" but not every compatible
-            # weights file has that label. Use its canonical COCO class id only
-            # when that label set is present; do not fail the entire scan.
-            names = model.names if isinstance(model.names, dict) else dict(enumerate(model.names))
-            if str(names.get(67, "")).lower() == "cell phone":
-                class_ids = [67]
-            else:
-                detections = _fallback_phone_scan(frame)
-                return detections, "fallback" if detections else "no-phone-class"
-        # Ultralytics models are shared by threaded Flask requests; serialize inference.
         with _model_lock:
-            # Keep CPU and memory usage bounded on small hosted instances. Face
-            # metrics are computed independently before this optional pass.
-            result = model.predict(frame, classes=class_ids, conf=float(confidence), imgsz=640, verbose=False)[0]
+            result = model.predict(
+                source=frame,
+                classes=class_ids,
+                conf=threshold,
+                imgsz=640,
+                device="cpu",
+                verbose=False,
+            )[0]
         detections = _read_result(result)
+        logger.info(
+            "YOLO phone inference completed: model=%s class_ids=%s frame=%sx%s detections=%s confidences=%s duration_ms=%s",
+            _model_path,
+            class_ids,
+            width,
+            height,
+            len(detections),
+            [item["confidence"] for item in detections],
+            round((time.monotonic() - started) * 1000),
+        )
         return detections, "ready"
-    except Exception as exc:
-        logger.exception("Phone detection inference failed")
-        detections = _fallback_phone_scan(frame)
-        return detections, "fallback" if detections else "error"
+    except Exception:
+        logger.exception(
+            "YOLO phone inference failed: model=%s class_ids=%s frame=%sx%s confidence=%.3f",
+            _model_path,
+            class_ids,
+            width,
+            height,
+            threshold,
+        )
+        return [], "error"
 
 
 def _read_result(result, offset_x=0, offset_y=0):
     detections = []
-    if result.boxes is not None:
-        for box in result.boxes:
-            x1, y1, x2, y2 = [int(round(value)) for value in box.xyxy[0].tolist()]
-            detections.append({
-                "label": str(result.names[int(box.cls[0].item())]),
-                "confidence": round(float(box.conf[0].item()), 3),
-                "bbox": {"x": x1 + offset_x, "y": y1 + offset_y,
-                         "width": max(1, x2 - x1), "height": max(1, y2 - y1)},
-            })
-    return detections
+    names = _normalize_names(getattr(result, "names", {}))
+    boxes = getattr(result, "boxes", None)
+    if boxes is None:
+        return detections
 
-
-def _fallback_phone_scan(frame):
-    """Find phone-shaped high-contrast rectangles when YOLO weights are absent."""
-    if frame is None or not hasattr(frame, "shape"):
-        return []
-    height, width = frame.shape[:2]
-    if width < 80 or height < 80:
-        return []
-    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-    edges = cv2.Canny(cv2.GaussianBlur(gray, (5, 5), 0), 65, 150)
-    contours, _ = cv2.findContours(edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-    detections = []
-    frame_area = width * height
-    for contour in contours:
-        x, y, box_width, box_height = cv2.boundingRect(contour)
-        area = box_width * box_height
-        ratio = box_height / max(box_width, 1)
-        fill = cv2.contourArea(contour) / max(area, 1)
-        if not (frame_area * 0.002 <= area <= frame_area * 0.18 and 1.35 <= ratio <= 2.8 and fill >= 0.25):
+    for box in boxes:
+        class_id = int(box.cls[0].item())
+        label = names.get(class_id)
+        if label is None:
+            logger.warning("YOLO returned unknown class id %s; skipping box", class_id)
             continue
-        score = min(0.74, max(0.33, 0.33 + (ratio - 1.35) * 0.12 + fill * 0.12))
-        detections.append({
-            "label": "phone-shaped object (fallback)",
-            "confidence": round(score, 3),
-            "bbox": {"x": x, "y": y, "width": box_width, "height": box_height},
-        })
-    detections.sort(key=lambda item: item["confidence"], reverse=True)
-    return detections[:5]
+        x1, y1, x2, y2 = [int(round(value)) for value in box.xyxy[0].tolist()]
+        detections.append(
+            {
+                "label": label,
+                "confidence": round(float(box.conf[0].item()), 3),
+                "bbox": {
+                    "x": x1 + offset_x,
+                    "y": y1 + offset_y,
+                    "width": max(1, x2 - x1),
+                    "height": max(1, y2 - y1),
+                },
+            }
+        )
+    return detections

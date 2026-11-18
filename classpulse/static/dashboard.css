@@ -1765,6 +1765,13 @@ input[type="range"] { accent-color: #087f78; }
 .privacy-consent input { accent-color: #087f78; }
 .scan-history-panel { margin-top: 20px; }
 .student-scan-filters { margin-bottom: 14px; }
+.scan-history-actions { display: flex; gap: 8px; }
+.saved-results-wrap { overflow-x: auto; }
+.saved-results-table { width: 100%; border-collapse: collapse; min-width: 760px; }
+.saved-results-table th, .saved-results-table td { padding: 10px 12px; border-bottom: 1px solid #e1ebea; text-align: left; vertical-align: top; color: #536b70; font-size: .78rem; line-height: 1.55; }
+.saved-results-table th { color: #29494d; background: #f5f9f8; font-weight: 700; }
+.saved-result-thumb { width: 92px; height: 68px; border-radius: 7px; object-fit: cover; }
+.saved-results-table td strong { color: #29494d; }
 .student-scan-history { display: grid; gap: 10px; }
 .student-scan-card { display: grid; grid-template-columns: 88px minmax(140px, 1fr) minmax(190px, auto); align-items: center; gap: 14px; padding: 12px; border: 1px solid #e1ebea; border-radius: 11px; background: #fbfdfd; }
 .student-scan-card img { width: 88px; height: 68px; border-radius: 8px; background: #e8f0ef; object-fit: cover; }

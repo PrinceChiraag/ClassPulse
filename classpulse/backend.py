@@ -1,5 +1,6 @@
 
 import base64
+import binascii
 import logging
 import os
 import secrets
@@ -19,7 +20,13 @@ except Exception:
     mp = None
 
 from classpulse.metrics import compute_attention_fatigue
-from classpulse.phone_detection import detect_phones, phone_detector_runtime_status
+from classpulse.phone_detection import (
+    detect_objects,
+    detect_phones,
+    is_phone_label,
+    object_detector_runtime_status,
+    phone_detector_runtime_status,
+)
 from classpulse.store import TeacherStore, TelemetryStore, validate_email, validate_username
 
 
@@ -170,11 +177,17 @@ def build_face_summary(metrics: dict) -> dict:
             1,
         )
 
-    overall_score = (
-        (attention * 0.55)
-        + (posture_score * 100 * 0.25)
-        + (eye_engagement * 100 * 0.2)
-    )
+    overall_score = _overall_score(attention, posture_score, eye_engagement)
+    face_entries = metrics.get("faces", [])
+    for item in face_entries:
+        item.setdefault(
+            "overall_score",
+            _overall_score(
+                item.get("attention", 0.0),
+                item.get("posture_score", 0.0),
+                item.get("eye_engagement", 0.0),
+            ),
+        )
 
     summary = {
         "attention": round(attention, 1),
@@ -202,6 +215,22 @@ def build_face_summary(metrics: dict) -> dict:
     return summary
 
 
+def _overall_score(attention, posture_score, eye_engagement):
+    """Return the same bounded overall score for every analysis path."""
+    return round(
+        max(
+            0.0,
+            min(
+                100.0,
+                (float(attention) * 0.55)
+                + (float(posture_score) * 100 * 0.25)
+                + (float(eye_engagement) * 100 * 0.2),
+            ),
+        ),
+        1,
+    )
+
+
 def _fallback_face_metrics(frame):
     gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
     gray = cv2.equalizeHist(gray)
@@ -222,9 +251,9 @@ def _fallback_face_metrics(frame):
 
         faces = cascade.detectMultiScale(
             gray,
-            scaleFactor=1.08,
+            scaleFactor=1.05,
             minNeighbors=neighbors,
-            minSize=(32, 32),
+            minSize=(24, 24),
         )
 
         if len(faces):
@@ -351,6 +380,13 @@ def _aggregate_face_scan(face_entries):
             }
         )
 
+    for item in face_entries:
+        item["overall_score"] = _overall_score(
+            item.get("attention", 0.0),
+            item.get("posture_score", 0.0),
+            item.get("eye_engagement", 0.0),
+        )
+
     average_attention = (
         sum(item["attention"] for item in face_entries) / len(face_entries)
     )
@@ -399,25 +435,51 @@ def _add_phone_scan(summary, frame, detection_settings=None):
     settings = detection_settings or {}
 
     if settings.get("phone_detection", True) is False:
+        summary["object_detections"] = []
         summary["phone_detections"] = []
         summary["phone_detection_status"] = "disabled"
+        summary["object_detection_status"] = "disabled"
         summary["phone_alert"] = False
         return summary
 
     try:
-        detections, detector_status = detect_phones(
+        detections, detector_status = detect_objects(
             frame,
-            confidence=float(settings.get("phone_confidence", 0.08)),
+            confidence=float(settings.get("phone_confidence", 0.25)),
         )
     except Exception:
         logger.exception(
-            "Phone detection failed; returning face analysis without phone results"
+            "Object detection failed; returning face analysis without object results"
         )
         detections, detector_status = [], "error"
 
-    summary["phone_detections"] = detections
-    summary["phone_detection_status"] = detector_status
-    summary["phone_alert"] = bool(detections)
+    phone_detections = [
+        item for item in detections
+        if is_phone_label(item.get("label"))
+    ]
+    phone_runtime = phone_detector_runtime_status()
+    general_runtime = object_detector_runtime_status()
+    phone_status = detector_status
+    if detector_status == "ready" and phone_runtime == "ready":
+        phone_status = "ready"
+    elif detector_status in {"ready", "partial"} and general_runtime == "ready":
+        phone_status = "fallback"
+    elif detector_status == "partial" and phone_runtime == "ready" and general_runtime != "ready":
+        phone_status = "ready"
+    elif phone_runtime != "not-loaded":
+        phone_status = phone_runtime
+    logger.info(
+        "Captured-frame object scan completed: objects=%s phones=%s phone_status=%s phone_confidences=%s",
+        len(detections),
+        len(phone_detections),
+        phone_status,
+        [item.get("confidence", 0.0) for item in phone_detections],
+    )
+    summary["object_detections"] = detections
+    summary["object_detection_status"] = detector_status
+    summary["phone_detections"] = phone_detections
+    summary["phone_detection_status"] = phone_status
+    summary["phone_alert"] = bool(phone_detections)
 
     return summary
 
@@ -427,14 +489,16 @@ def analyze_camera_frame(
     detection_mode="multi-face",
     detection_settings=None,
     scan_session="default",
+    object_frame=None,
 ):
+    object_detection_frame = frame if object_frame is None else object_frame
     if mp is None or not hasattr(mp, "solutions"):
         fallback = _fallback_face_metrics(frame)
         fallback["analysis_mode"] = "basic-fallback"
 
         return _add_phone_scan(
             build_face_summary(fallback),
-            frame,
+            object_detection_frame,
             detection_settings,
         )
 
@@ -710,17 +774,6 @@ def analyze_camera_frame(
                         rolling_state=local_state,
                     )
 
-                    if not settings.get("fatigue_detection", True):
-                        metrics.update(
-                            {
-                                "fatigue": 0.0,
-                                "fatigue_index": 0.0,
-                                "microsleep": False,
-                                "yawning": False,
-                                "drowsiness_state": "Disabled",
-                            }
-                        )
-
                     metrics["label"] = f"Student {index + 1}"
                     metrics["face_index"] = index
                     metrics["bbox"] = bbox
@@ -748,27 +801,20 @@ def analyze_camera_frame(
                 face_entries[0].get("analysis_mode")
                 == "face-detection-fallback"
             ):
-                summary = build_face_summary(
-                    {
-                        **face_entries[0],
-                        "face_detected": True,
-                        "face_count": len(face_entries),
-                        "faces": face_entries,
-                        "analysis_mode": "face-detection-fallback",
-                    }
-                )
+                summary = _aggregate_face_scan(face_entries)
+                summary["analysis_mode"] = "face-detection-fallback"
 
-                return _add_phone_scan(summary, frame, settings)
+                return _add_phone_scan(summary, object_detection_frame, settings)
 
             result = _aggregate_face_scan(face_entries)
 
-            return _add_phone_scan(result, frame, settings)
+            return _add_phone_scan(result, object_detection_frame, settings)
 
         close_face_analyzers()
 
         return _add_phone_scan(
             build_face_summary(_fallback_face_metrics(frame)),
-            frame,
+            object_detection_frame,
             settings,
         )
 
@@ -800,7 +846,7 @@ def analyze_camera_frame(
 
         return _add_phone_scan(
             build_face_summary(fallback),
-            frame,
+            object_detection_frame,
             detection_settings,
         )
 
@@ -1173,6 +1219,7 @@ def create_app():
                     else "sqlite-persistence-depends-on-host-volume"
                 ),
                 "phone_detector": phone_detector_runtime_status(),
+                "object_detector": object_detector_runtime_status(),
                 "face_detector": (
                     "ready"
                     if mp is not None and hasattr(mp, "solutions")
@@ -1563,7 +1610,7 @@ def create_app():
                     "face_blur": False,
                     "preview_blur": False,
                     "phone_detection": True,
-                    "phone_confidence": 0.08,
+                    "phone_confidence": 0.25,
                     "show_phone_boxes": True,
                     "sound_alerts": False,
                     "capture_interval": 5,
@@ -1735,11 +1782,16 @@ def create_app():
             ), 400
 
         try:
-            if image_data.startswith("data:image"):
-                image_header, image_data = image_data.split(",", 1)
-                image_mime = image_header[5:].split(";", 1)[0]
-            else:
-                image_mime = "image/jpeg"
+            try:
+                if image_data.startswith("data:image"):
+                    image_header, image_data = image_data.split(",", 1)
+                    image_mime = image_header[5:].split(";", 1)[0]
+                else:
+                    image_mime = "image/jpeg"
+                image_bytes = base64.b64decode(image_data, validate=True)
+            except (ValueError, binascii.Error):
+                logger.warning("Scan request contained malformed image data")
+                return jsonify({"error": "The captured image data is invalid.", "status": "invalid-image"}), 400
 
             if image_mime not in {
                 "image/jpeg",
@@ -1752,11 +1804,6 @@ def create_app():
                         "status": "invalid-image",
                     }
                 ), 400
-
-            image_bytes = base64.b64decode(
-                image_data,
-                validate=True,
-            )
 
             image_array = np.frombuffer(
                 image_bytes,
@@ -1812,15 +1859,6 @@ def create_app():
             if not isinstance(detection_mode, str):
                 detection_mode = "multi-face"
 
-            if (
-                request.path == "/api/scan"
-                and payload.get("defer_phone_detection") is True
-            ):
-                detection_settings = {
-                    **detection_settings,
-                    "phone_detection": False,
-                }
-
             scan_session = (
                 getattr(g, "mobile_scan_session", None)
                 or session.setdefault(
@@ -1849,6 +1887,7 @@ def create_app():
                 detection_mode=detection_mode,
                 detection_settings=detection_settings,
                 scan_session=scan_session,
+                object_frame=frame,
             )
 
             teacher = get_authenticated_teacher()
@@ -1869,11 +1908,18 @@ def create_app():
                         "Could not append scan telemetry; returning face scores"
                     )
 
-            if teacher is not None and all(identity_values):
+            if teacher is not None and (all(identity_values) or payload.get("save_scan") is True):
                 try:
+                    scan_identity = identity
+                    if not all(identity_values):
+                        scan_identity = {
+                            "name": "Saved image",
+                            "class_name": "Unassigned",
+                            "roll_number": f"image-{secrets.token_hex(6)}",
+                        }
                     saved = app.teacher_store.save_student_scan(
                         int(teacher["id"]),
-                        identity,
+                        scan_identity,
                         image_bytes,
                         metrics,
                         image_mime,
@@ -1950,28 +1996,27 @@ def create_app():
             ), 400
 
         try:
-            if image_data.startswith("data:image"):
-                header, encoded = image_data.split(",", 1)
-                mime = header[5:].split(";", 1)[0]
+            try:
+                if image_data.startswith("data:image"):
+                    header, encoded = image_data.split(",", 1)
+                    mime = header[5:].split(";", 1)[0]
 
-                if mime not in {
-                    "image/jpeg",
-                    "image/png",
-                    "image/webp",
-                }:
-                    return jsonify(
-                        {
-                            "error": "Unsupported image type.",
-                            "status": "invalid-image",
-                        }
-                    ), 400
-            else:
-                encoded = image_data
+                    if mime not in {"image/jpeg", "image/png", "image/webp"}:
+                        return jsonify({"error": "Unsupported image type.", "status": "invalid-image"}), 400
+                else:
+                    encoded = image_data
 
-            image_bytes = base64.b64decode(
-                encoded,
-                validate=True,
-            )
+                image_bytes = base64.b64decode(encoded, validate=True)
+            except (ValueError, binascii.Error):
+                logger.warning("Phone detection request contained malformed image data")
+                return jsonify({
+                    "error": "The captured image data is invalid.",
+                    "status": "invalid-image",
+                    "phone_detections": [],
+                    "object_detections": [],
+                    "phone_detection_status": "invalid-image",
+                    "phone_alert": False,
+                }), 400
 
             frame = cv2.imdecode(
                 np.frombuffer(image_bytes, dtype=np.uint8),
@@ -1979,6 +2024,7 @@ def create_app():
             )
 
             if frame is None:
+                logger.warning("Phone detection request image could not be decoded")
                 return jsonify(
                     {
                         "error": "The captured image could not be read.",
@@ -1996,15 +2042,15 @@ def create_app():
 
             try:
                 confidence = max(
-                    0.02,
-                    min(0.8, float(payload.get("confidence", 0.08))),
+                    0.10,
+                    min(0.8, float(payload.get("confidence", 0.25))),
                 )
 
             except (TypeError, ValueError):
-                confidence = 0.08
+                confidence = 0.25
 
             try:
-                detections, detector_status = detect_phones(
+                detections, detector_status = detect_objects(
                     frame,
                     confidence=confidence,
                 )
@@ -2016,11 +2062,25 @@ def create_app():
 
                 detections, detector_status = [], "error"
 
+            phone_detections = [item for item in detections if is_phone_label(item.get("label"))]
+            phone_runtime = phone_detector_runtime_status()
+            general_runtime = object_detector_runtime_status()
+            phone_status = detector_status
+            if detector_status == "ready" and phone_runtime == "ready":
+                phone_status = "ready"
+            elif detector_status in {"ready", "partial"} and general_runtime == "ready":
+                phone_status = "fallback"
+            elif detector_status == "partial" and phone_runtime == "ready" and general_runtime != "ready":
+                phone_status = "ready"
+            elif phone_runtime != "not-loaded":
+                phone_status = phone_runtime
             return jsonify(
                 {
-                    "phone_detections": detections,
-                    "phone_detection_status": detector_status,
-                    "phone_alert": bool(detections),
+                    "object_detections": detections,
+                    "phone_detections": phone_detections,
+                    "object_detection_status": detector_status,
+                    "phone_detection_status": phone_status,
+                    "phone_alert": bool(phone_detections),
                     "frame_width": int(frame.shape[1]),
                     "frame_height": int(frame.shape[0]),
                 }

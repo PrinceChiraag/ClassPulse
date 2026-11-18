@@ -1,3 +1,4 @@
+import json
 import re
 import sqlite3
 import threading
@@ -195,6 +196,7 @@ class TeacherStore:
                     posture_score REAL NOT NULL,
                     confidence REAL NOT NULL,
                     fatigue_level TEXT NOT NULL,
+                    analysis_json TEXT NOT NULL DEFAULT '{{}}',
                     timestamp TEXT NOT NULL,
                     created_at TEXT DEFAULT {text_now},
                     FOREIGN KEY(teacher_id) REFERENCES teachers(id),
@@ -205,6 +207,10 @@ class TeacherStore:
 
             # Migrate existing installations without invalidating accounts.
             if self.use_postgres:
+                connection.execute(
+                    "ALTER TABLE student_scans ADD COLUMN IF NOT EXISTS "
+                    "analysis_json TEXT NOT NULL DEFAULT '{}'"
+                )
                 connection.execute(
                     "ALTER TABLE teachers ADD COLUMN IF NOT EXISTS username TEXT"
                 )
@@ -221,6 +227,18 @@ class TeacherStore:
                     "idx_teachers_email_ci ON teachers (LOWER(email))"
                 )
             else:
+                scan_columns = {
+                    row["name"]
+                    for row in connection.execute(
+                        "PRAGMA table_info(student_scans)"
+                    ).fetchall()
+                }
+                if "analysis_json" not in scan_columns:
+                    connection.execute(
+                        "ALTER TABLE student_scans ADD COLUMN "
+                        "analysis_json TEXT NOT NULL DEFAULT '{}'"
+                    )
+
                 columns = {
                     row["name"]
                     for row in connection.execute(
@@ -591,9 +609,9 @@ class TeacherStore:
                 (
                     teacher_id, student_id, image_data, image_mime,
                     attention, fatigue, posture_score, confidence,
-                    fatigue_level, timestamp
+                    fatigue_level, analysis_json, timestamp
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 RETURNING id
                 """,
                 (
@@ -606,6 +624,7 @@ class TeacherStore:
                     float(metrics.get("posture_score", 0)),
                     float(metrics.get("confidence", 0)),
                     fatigue_level,
+                    json.dumps(metrics, separators=(",", ":")),
                     timestamp,
                 ),
             )
@@ -621,6 +640,7 @@ class TeacherStore:
                 "fatigue_level": fatigue_level,
                 "fatigue": fatigue,
                 "attention": float(metrics.get("attention", 0)),
+                "overall_score": float(metrics.get("overall_score", 0)),
                 "timestamp": timestamp,
             }
 
@@ -641,6 +661,7 @@ class TeacherStore:
                 ss.posture_score,
                 ss.confidence,
                 ss.fatigue_level,
+                ss.analysis_json,
                 ss.timestamp
             FROM student_scans ss
             JOIN students s ON s.id=ss.student_id
@@ -660,10 +681,13 @@ class TeacherStore:
         query += " ORDER BY ss.timestamp DESC LIMIT 250"
 
         with self._connect() as connection:
-            return [
-                dict(row)
-                for row in connection.execute(query, params).fetchall()
-            ]
+            scans = [dict(row) for row in connection.execute(query, params).fetchall()]
+        for scan in scans:
+            try:
+                scan["analysis"] = json.loads(scan.pop("analysis_json", "{}"))
+            except (TypeError, ValueError):
+                scan["analysis"] = {}
+        return scans
 
     def get_student_scan_image(self, teacher_id: int, scan_id: int):
         with self._connect() as connection:

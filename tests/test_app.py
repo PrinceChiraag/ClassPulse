@@ -126,7 +126,7 @@ def test_forgot_password_request_is_private_and_actionable():
 
 def test_phone_endpoint_keeps_optional_detection_failure_nonfatal(monkeypatch):
     client = authenticated_client()
-    monkeypatch.setattr(backend, "detect_phones", lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("model failed")))
+    monkeypatch.setattr(backend, "detect_objects", lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("model failed")))
     ok, encoded = cv2.imencode(".jpg", np.zeros((120, 120, 3), dtype=np.uint8))
     assert ok
     image_data = "data:image/jpeg;base64," + base64.b64encode(encoded.tobytes()).decode("ascii")
@@ -136,6 +136,16 @@ def test_phone_endpoint_keeps_optional_detection_failure_nonfatal(monkeypatch):
     assert response.status_code == 200
     assert response.get_json()["phone_detection_status"] == "error"
     assert response.get_json()["phone_detections"] == []
+
+
+def test_phone_endpoint_returns_controlled_error_for_invalid_frame():
+    response = authenticated_client().post(
+        "/api/phone-detect",
+        json={"image_data": "not-base64"},
+    )
+
+    assert response.status_code == 400
+    assert response.get_json()["phone_detection_status"] == "invalid-image"
 
 
 def test_dashboard_config_includes_camera_and_threshold_controls():
@@ -287,7 +297,7 @@ def test_heatmap_and_alerts_endpoint_has_no_seeded_classroom_data():
 
 def test_scan_endpoint_accepts_camera_frame_and_returns_metrics(monkeypatch):
     client = authenticated_client()
-    monkeypatch.setattr(backend, "detect_phones", lambda frame, confidence=0.32: ([], "ready"))
+    monkeypatch.setattr(backend, "detect_objects", lambda frame, confidence=0.32: ([], "ready"))
     ok, encoded = cv2.imencode(".jpg", np.zeros((480, 640, 3), dtype=np.uint8))
     assert ok
     image_data = "data:image/jpeg;base64," + base64.b64encode(encoded.tobytes()).decode("ascii")
@@ -307,6 +317,16 @@ def test_scan_endpoint_accepts_camera_frame_and_returns_metrics(monkeypatch):
     assert "confidence" in payload
     assert "overall_score" in payload
     assert payload["phone_detection_status"] == "ready"
+
+
+def test_scan_endpoint_returns_controlled_error_for_malformed_image():
+    response = authenticated_client().post(
+        "/api/scan",
+        json={"image_data": "not-base64"},
+    )
+
+    assert response.status_code == 400
+    assert response.get_json()["status"] == "invalid-image"
 
 
 def test_aggregate_face_scan_returns_nonzero_scores_for_detected_faces():
@@ -362,7 +382,7 @@ def test_multi_face_scan_returns_scores_without_starting_single_person_pose(monk
         assert face_mesh_instances[0].closed is True
         return [], "ready"
 
-    monkeypatch.setattr(backend, "detect_phones", phone_detector)
+    monkeypatch.setattr(backend, "detect_objects", phone_detector)
     monkeypatch.setattr(backend, "compute_attention_fatigue", lambda *_args, **_kwargs: {
         "attention": 72.0, "fatigue": 0.2, "fatigue_index": 20.0,
         "eye_engagement": 0.35, "posture_score": 0.7,
@@ -410,7 +430,7 @@ def test_face_detection_fallback_returns_face_and_explains_estimate(monkeypatch)
         face_detection=SimpleNamespace(FaceDetection=FaceDetector),
     ))
     monkeypatch.setattr(backend, "mp", fake_mp)
-    monkeypatch.setattr(backend, "detect_phones", lambda _frame, confidence=0.2: ([], "ready"))
+    monkeypatch.setattr(backend, "detect_objects", lambda _frame, confidence=0.2: ([], "ready"))
 
     result = backend.analyze_camera_frame(np.zeros((240, 320, 3), dtype=np.uint8))
 
@@ -422,6 +442,52 @@ def test_face_detection_fallback_returns_face_and_explains_estimate(monkeypatch)
     assert result["recommendation"]
 
 
+def test_fatigue_scores_are_still_computed_when_fatigue_toggle_is_off(monkeypatch):
+    class Mesh:
+        def __init__(self, **_kwargs):
+            pass
+
+        def process(self, _image):
+            points = [SimpleNamespace(x=0.4, y=0.3), SimpleNamespace(x=0.6, y=0.7)]
+            return SimpleNamespace(multi_face_landmarks=[SimpleNamespace(landmark=points)])
+
+        def close(self):
+            pass
+
+    fake_mp = SimpleNamespace(solutions=SimpleNamespace(
+        face_mesh=SimpleNamespace(FaceMesh=Mesh),
+        pose=SimpleNamespace(),
+        face_detection=SimpleNamespace(),
+    ))
+    monkeypatch.setattr(backend, "mp", fake_mp)
+    monkeypatch.setattr(
+        backend,
+        "compute_attention_fatigue",
+        lambda *_args, **_kwargs: {
+            "attention": 65.0,
+            "fatigue": 0.42,
+            "fatigue_index": 42.0,
+            "eye_engagement": 0.3,
+            "posture_score": 0.7,
+            "drowsiness_state": "Alert",
+            "microsleep": False,
+            "yawning": False,
+        },
+    )
+    monkeypatch.setattr(backend, "detect_objects", lambda *_args, **_kwargs: ([], "ready"))
+
+    result = backend.analyze_camera_frame(
+        np.zeros((100, 120, 3), dtype=np.uint8),
+        detection_mode="single-user",
+        detection_settings={"fatigue_detection": False, "posture_analysis": False},
+        scan_session="fatigue-toggle-test",
+    )
+
+    assert result["fatigue"] == 0.42
+    assert result["fatigue_index"] == 42.0
+    assert result["faces"][0]["fatigue"] == 0.42
+
+
 def test_phone_detector_uses_recall_friendly_model_settings(monkeypatch):
     from classpulse import phone_detection
 
@@ -430,7 +496,7 @@ def test_phone_detector_uses_recall_friendly_model_settings(monkeypatch):
     class FakeModel:
         names = {67: "cell phone"}
 
-        def predict(self, _frame, **kwargs):
+        def predict(self, source, **kwargs):
             captured.update(kwargs)
             return [SimpleNamespace(boxes=None)]
 
@@ -439,8 +505,10 @@ def test_phone_detector_uses_recall_friendly_model_settings(monkeypatch):
 
     assert status == "ready"
     assert detections == []
-    assert captured["conf"] == 0.12
+    assert captured["conf"] == 0.25
     assert captured["imgsz"] == 640
+    assert captured["classes"] == [67]
+    assert captured["device"] == "cpu"
 
 
 def test_phone_detector_uses_a_single_inference_for_fast_large_frame_scans(monkeypatch):
@@ -451,8 +519,8 @@ def test_phone_detector_uses_a_single_inference_for_fast_large_frame_scans(monke
     class FakeModel:
         names = {67: "cell phone"}
 
-        def predict(self, frame, **kwargs):
-            calls.append(frame.shape[:2])
+        def predict(self, source, **kwargs):
+            calls.append(source.shape[:2])
             return [SimpleNamespace(boxes=None)]
 
     monkeypatch.setattr(phone_detection, "_get_model", lambda: FakeModel())
@@ -466,7 +534,7 @@ def test_phone_detector_uses_a_single_inference_for_fast_large_frame_scans(monke
 
 def test_phone_detection_failure_does_not_fail_face_scan(monkeypatch):
     monkeypatch.setattr(backend, "mp", None)
-    monkeypatch.setattr(backend, "detect_phones", lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("model failed")))
+    monkeypatch.setattr(backend, "detect_objects", lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("model failed")))
     ok, encoded = cv2.imencode(".jpg", np.zeros((480, 640, 3), dtype=np.uint8))
     assert ok
     image_data = "data:image/jpeg;base64," + base64.b64encode(encoded.tobytes()).decode("ascii")
@@ -475,17 +543,22 @@ def test_phone_detection_failure_does_not_fail_face_scan(monkeypatch):
     assert response.status_code == 200
     result = response.get_json()
     assert "attention" in result
+    assert "fatigue" in result
+    assert "fatigue_index" in result
     assert "overall_score" in result
     assert result["phone_detection_status"] == "error"
 
 
-def test_analyze_camera_frame_falls_back_when_mediapipe_is_unavailable():
+def test_analyze_camera_frame_falls_back_when_mediapipe_is_unavailable(monkeypatch):
     original_mp = backend.mp
+    monkeypatch.setattr(backend, "detect_objects", lambda *_args, **_kwargs: ([], "ready"))
     backend.mp = None
     try:
         frame = np.zeros((240, 320, 3), dtype=np.uint8)
         result = backend.analyze_camera_frame(frame)
         assert 0.0 <= result["attention"] <= 100.0
+        assert 0.0 <= result["fatigue"] <= 1.0
+        assert 0.0 <= result["fatigue_index"] <= 100.0
         assert 0.0 <= result["overall_score"] <= 100.0
         assert "status" in result
     finally:

@@ -1,6 +1,9 @@
 Flask>=3.0.3
 gunicorn>=22.0.0
-opencv-python>=4.10.0,<5
+# MediaPipe requires contrib while Ultralytics requires standard OpenCV.
+# Keep their shared cv2 binaries on the same tested version.
+opencv-python==4.11.0.86
+opencv-contrib-python==4.11.0.86
 mediapipe==0.10.21
 ultralytics>=8.3.0
 numpy>=1.26.0,<2

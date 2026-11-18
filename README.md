@@ -8,7 +8,7 @@ It is a decision-support prototype, not a validated measure of learning, attenti
 
 - Teacher registration with a unique username; sign in with username or email using password hashes and signed sessions.
 - Responsive teacher portal with camera controls, scan settings, live summaries, and light/dark themes.
-- MediaPipe face landmarks and posture cues, with an OpenCV fallback; optional Ultralytics phone-object detection.
+- MediaPipe face landmarks and posture cues, with an OpenCV fallback; Ultralytics custom phone detection plus general COCO object detection.
 - Versioned bearer-token API for a future native mobile client (`docs/mobile-api.md`, `docs/openapi.yaml`).
 - SQLite for local development or PostgreSQL for hosted deployments, with opt-in named scan records. Camera frames are processed in memory by default; a teacher can explicitly opt into retaining a named scan from Overview.
 - Security headers, bounded request size and decoded image dimensions, authenticated application APIs, and production checks for secret configuration.
@@ -26,11 +26,11 @@ python app.py
 
 Run the server with the same `.venv` interpreter used for installation. On Windows, `.\run-classpulse.ps1` starts it with `.venv\Scripts\python.exe`. In VS Code, select that interpreter before launching `app.py`; using a different system Python can leave Ultralytics unavailable even though it is listed in `requirements.txt`. The `/health` response includes the phone detector's runtime status. The bundled `yolo11n.pt` model is loaded from the project directory by default.
 
-Open `http://localhost:5000/login`. The local demo account is `teacher@classpulse.com` / `Teacher@123`; replace it before any shared or public deployment. HTTPS is unnecessary for the localhost camera workflow. Browsers require HTTPS for camera access on non-localhost hosts.
+Open `http://localhost:5000/login`. The local demo account is `teacher@classpulse.com` / `Teacher@123`; replace it before any shared or public deployment. HTTPS is unnecessary for the localhost camera workflow. Browsers require HTTPS for camera access on non-localhost hosts. The bundled custom phone detector is `models/phone_best.pt`; set `CLASSPULSE_PHONE_MODEL` to override it. General objects use `yolo11n.pt`. Both models run on CPU and `/health` reports their runtime status.
 
 ## Deploy with Docker Compose
 
-The image bundles the provided `yolo11n.pt` weights so inference does not need a first-request model download. It uses a single Gunicorn worker because the SQLite database and temporal face tracks are local to one process. Persistent storage is mounted at `/data`. Put the service behind a TLS-terminating reverse proxy on the deployment host; do not expose its port directly to the public internet.
+The image bundles both `yolo11n.pt` and the custom `models/phone_best.pt` weights so inference does not need a first-request model download. The custom phone detector and general COCO object detector run on CPU and are loaded on first use. It uses a single Gunicorn worker because the SQLite database and temporal face tracks are local to one process. Persistent storage is mounted at `/data`. Put the service behind a TLS-terminating reverse proxy on the deployment host; do not expose its port directly to the public internet.
 
 1. Generate a secret: `python -c "import secrets; print(secrets.token_urlsafe(48))"`.
 2. Create a `.env` file containing `SECRET_KEY=<generated value>`; keep it out of source control.
@@ -58,7 +58,7 @@ Copy `.env.example` for local configuration. Common deployment settings:
 ## Privacy and limitations
 
 - Camera permission is requested by the browser after the teacher starts the camera. Stop the camera when the scan is done.
-- Submitted frames are processed in memory. A named scan, including its source image and derived metrics, is stored only when the teacher checks the explicit save option and provides a name, class, and roll number. Protect and periodically review the SQLite file; it contains personal data when this feature is used.
+- Submitted frames are processed in memory. A scan, including its source image, detected faces, and derived metrics, is stored only when the teacher explicitly saves it. Protect and periodically review the database; it contains personal data when this feature is used.
 - Temporal eye and mouth signals are heuristic; the fallback uses coarse image brightness, edges, and face size and is not a reliable attention detector. Phone detection finds object-like phones and cannot prove ownership or use.
 - This repository does not include a representative, consented classroom dataset or validated accuracy claims. The pretrained object model and heuristic metrics require evaluation for the intended population and environment.
 - Student scan records are not automatically expired. Apply an institutional retention policy and delete the database when appropriate.

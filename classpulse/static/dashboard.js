@@ -322,22 +322,24 @@ function renderPhoneDetections(result) {
         const scale = Math.max(width / frameWidth, height / frameHeight);
         const offsetX = (width - frameWidth * scale) / 2;
         const offsetY = (height - frameHeight * scale) / 2;
-        if (dashboardConfig.controls.show_phone_boxes !== false) phones.forEach((item) => {
+        detections.forEach((item) => {
             const box = item.bbox || {};
             const y = offsetY + Number(box.y || 0) * scale;
             const w = Number(box.width || 0) * scale, h = Number(box.height || 0) * scale;
             const rawX = Number(box.x || 0);
             const sourceX = cameraFeed.classList.contains("camera-mirrored") ? frameWidth - rawX - Number(box.width || 0) : rawX;
             const x = offsetX + sourceX * scale;
+            const isPhone = /phone|smartphone|mobile|handset/i.test(item.label || "");
+            if (isPhone && dashboardConfig.controls.show_phone_boxes === false) return;
             ctx.lineWidth = Math.max(2 * dpr, width / 500);
-            ctx.strokeStyle = "#ff3030";
-            ctx.fillStyle = "rgba(255, 48, 48, .20)";
+            ctx.strokeStyle = isPhone ? "#ff3030" : "#ffc247";
+            ctx.fillStyle = isPhone ? "rgba(255, 48, 48, .20)" : "rgba(255, 194, 71, .16)";
             ctx.strokeRect(x, y, w, h);
             ctx.fillRect(x, y, w, h);
             ctx.font = `${Math.max(14 * dpr, width / 55)}px Segoe UI, sans-serif`;
             const label = `${String(item.label || "Object").toUpperCase()} ${Math.round(Number(item.confidence || 0) * 100)}%`;
             const labelWidth = ctx.measureText(label).width + 12;
-            ctx.fillStyle = "#b42318";
+            ctx.fillStyle = isPhone ? "#b42318" : "#8a5b00";
             ctx.fillRect(x, Math.max(0, y - 28 * dpr), labelWidth, 26 * dpr);
             ctx.fillStyle = "#ffffff";
             ctx.fillText(label, x + 6 * dpr, Math.max(19 * dpr, y - 9 * dpr));
@@ -350,6 +352,10 @@ function renderPhoneDetections(result) {
             phoneDetectionStatus.textContent = `Objects detected: ${detections.map((item) => item.label).join(", ")}`;
         } else if (state === "ready") {
             phoneDetectionStatus.textContent = "Object scan active · no supported objects detected";
+        } else if (state === "partial") {
+            phoneDetectionStatus.textContent = result.phone_detection_status === "fallback"
+                ? "General object scan active · using COCO phone fallback"
+                : "Phone scan active · general object detector unavailable";
         } else if (state === "fallback") {
             phoneDetectionStatus.classList.add("detected");
             phoneDetectionStatus.textContent = "Fallback object scan active";
