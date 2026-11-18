@@ -91,7 +91,7 @@ let dashboardConfig = {
         face_blur: false,
         preview_blur: false,
         phone_detection: true,
-        phone_confidence: 0.08,
+        phone_confidence: 0.25,
         show_phone_boxes: true,
         sound_alerts: false,
         auto_refresh: true,
@@ -223,7 +223,7 @@ function renderControls() {
     }
 
     if (phoneConfidenceInput) {
-        const value = Number(dashboardConfig.controls.phone_confidence ?? 0.08);
+        const value = Number(dashboardConfig.controls.phone_confidence ?? 0.25);
         phoneConfidenceInput.value = String(value);
         if (phoneConfidenceLabel) phoneConfidenceLabel.textContent = value.toFixed(2);
     }
@@ -248,7 +248,7 @@ function renderControls() {
         const value = Number(dashboardConfig.controls.posture_tilt_degrees ?? 18);
         postureTiltDegreesInput.value = String(value);
         if (postureTiltDegreesLabel) {
-            postureTiltDegreesLabel.textContent = `${value.toFixed(0)}°`;
+            postureTiltDegreesLabel.textContent = `${value.toFixed(0)}Â°`;
         }
     }
 
@@ -289,15 +289,19 @@ function configureLiveTimers() {
 }
 
 function renderPhoneDetections(result) {
-    const detections = Array.isArray(result.phone_detections) ? result.phone_detections : [];
-    const state = result.phone_detection_status || "unavailable";
+    const detections = Array.isArray(result.object_detections)
+        ? result.object_detections
+        : Array.isArray(result.phone_detections) ? result.phone_detections : [];
+    const phones = Array.isArray(result.phone_detections) ? result.phone_detections :
+        detections.filter((item) => /phone|smartphone|mobile|handset/i.test(item.label || ""));
+    const state = result.object_detection_status || result.phone_detection_status || "unavailable";
     if (summarySelectors.phone_warning) {
-        summarySelectors.phone_warning.hidden = detections.length === 0;
+        summarySelectors.phone_warning.hidden = phones.length === 0;
     }
     if (phoneScanAlert) {
         phoneScanAlert.hidden = detections.length === 0;
         phoneScanAlert.textContent = detections.length
-            ? `PHONE DETECTED: ${detections.length} phone${detections.length === 1 ? "" : "s"} found in frame.`
+            ? `OBJECTS DETECTED: ${detections.map((item) => item.label).join(", ")}`
             : "";
     }
     if (phoneOverlay && cameraFeed) {
@@ -313,10 +317,12 @@ function renderPhoneDetections(result) {
         }
         const ctx = phoneOverlay.getContext("2d");
         ctx.clearRect(0, 0, width, height);
-        const scale = Math.min(width / frameWidth, height / frameHeight);
+        // The camera video uses object-fit: cover (overridden by the responsive
+        // stylesheet), so match its crop instead of letterboxing the source.
+        const scale = Math.max(width / frameWidth, height / frameHeight);
         const offsetX = (width - frameWidth * scale) / 2;
         const offsetY = (height - frameHeight * scale) / 2;
-        if (dashboardConfig.controls.show_phone_boxes !== false) detections.forEach((item) => {
+        if (dashboardConfig.controls.show_phone_boxes !== false) phones.forEach((item) => {
             const box = item.bbox || {};
             const y = offsetY + Number(box.y || 0) * scale;
             const w = Number(box.width || 0) * scale, h = Number(box.height || 0) * scale;
@@ -329,7 +335,7 @@ function renderPhoneDetections(result) {
             ctx.strokeRect(x, y, w, h);
             ctx.fillRect(x, y, w, h);
             ctx.font = `${Math.max(14 * dpr, width / 55)}px Segoe UI, sans-serif`;
-            const label = `PHONE DETECTED ${Math.round(Number(item.confidence || 0) * 100)}%`;
+            const label = `${String(item.label || "Object").toUpperCase()} ${Math.round(Number(item.confidence || 0) * 100)}%`;
             const labelWidth = ctx.measureText(label).width + 12;
             ctx.fillStyle = "#b42318";
             ctx.fillRect(x, Math.max(0, y - 28 * dpr), labelWidth, 26 * dpr);
@@ -341,27 +347,27 @@ function renderPhoneDetections(result) {
         phoneDetectionStatus.classList.remove("detected", "unavailable");
         if (detections.length) {
             phoneDetectionStatus.classList.add("detected");
-            phoneDetectionStatus.textContent = `⚠ ${detections.length} phone object${detections.length === 1 ? "" : "s"} detected · check context`;
+            phoneDetectionStatus.textContent = `Objects detected: ${detections.map((item) => item.label).join(", ")}`;
         } else if (state === "ready") {
-            phoneDetectionStatus.textContent = "Phone scan active · no phone objects detected";
+            phoneDetectionStatus.textContent = "Object scan active · no supported objects detected";
         } else if (state === "fallback") {
             phoneDetectionStatus.classList.add("detected");
-            phoneDetectionStatus.textContent = "Fallback phone scan active";
+            phoneDetectionStatus.textContent = "Fallback object scan active";
         } else {
             phoneDetectionStatus.classList.add("unavailable");
             phoneDetectionStatus.textContent = state === "disabled"
-                ? "Phone scan is turned off"
+                ? "Object scan is turned off"
                 : state === "no-phone-class"
                     ? "Phone detection unavailable: model has no phone class"
                     : state === "not-installed"
-                        ? "Phone detector not installed in the server Python environment; install requirements.txt and restart"
+                        ? "Object detector is not installed in the server Python environment; install requirements.txt and restart"
                         : state === "model-not-found"
-                            ? "Phone detector weights are missing; set CLASSPULSE_PHONE_MODEL to yolo11n.pt"
+                        ? "Object detector weights are missing; install yolo11n.pt or set CLASSPULSE_PHONE_MODEL"
                     : state === "error"
-                        ? "Phone detector failed on the server; check deployment logs"
+                        ? "Object detector failed on the server; check deployment logs"
                         : state === "load-error"
-                            ? "Phone detector could not load; check server logs and model compatibility"
-                            : "Phone detection unavailable on the server; verify detector and model weights";
+                            ? "Object detector could not load; check server logs and model compatibility"
+                            : "Object detection unavailable on the server; verify detector and model weights";
         }
     }
     if (alertList) {
@@ -370,7 +376,7 @@ function renderPhoneDetections(result) {
             const item = document.createElement("li");
             item.className = "alert-item warning";
             item.dataset.phoneAlert = "true";
-            item.innerHTML = `<strong>Possible phone use</strong><span>${detections.length} phone object${detections.length === 1 ? "" : "s"} in frame</span><small>Visual cue only; check context</small>`;
+            item.innerHTML = `<strong>Objects detected</strong><span>${escapeHtml(detections.map((entry) => entry.label).join(", "))}</span><small>Model detections are visual cues; check the image</small>`;
             alertList.prepend(item);
         }
     }
@@ -705,7 +711,7 @@ function setCameraUnavailable(message = "Camera unavailable. Connect a webcam an
             ? "Use localhost or HTTPS in the browser, then allow camera access when prompted."
             : "Allow camera access in the browser and confirm the webcam permission request.";
         cameraAccessBanner.innerHTML = `
-            <div class="camera-access-icon">📷</div>
+            <div class="camera-access-icon">ðŸ“·</div>
             <div>
                 <strong>Allow camera access</strong>
                 <p>${bannerText}</p>
@@ -738,7 +744,7 @@ function renderFaceDetails(payload) {
     const primaryFace = faceEntries[0] || {};
     const hasFace = faceEntries.length > 0;
     const statusText = ["basic-fallback", "face-detection-fallback"].includes(detail.analysis_mode) && hasFace
-        ? "Basic estimate · detailed face analysis unavailable"
+        ? "Basic estimate Â· detailed face analysis unavailable"
         : detail.status || (hasFace ? (faceEntries.length > 1 ? `Multi-face scan: ${faceEntries.length} students` : "Face analyzed") : "No clear face detected");
     const confidenceValue = Number(primaryFace.confidence ?? detail.confidence ?? 0);
     const confidencePercent = Math.max(0, Math.min(100, confidenceValue));
@@ -817,34 +823,34 @@ function renderFaceDetails(payload) {
         summarySelectors.face_risk.textContent = detail.risk_level || (hasFace ? "Moderate" : "Needs reset");
     }
     if (summarySelectors.face_attention) {
-        summarySelectors.face_attention.textContent = hasFace ? `${attentionScore.toFixed(1)}/100` : "Awaiting face";
+        summarySelectors.face_attention.textContent = `${attentionScore.toFixed(1)}/100`;
     }
     if (summarySelectors.face_eye) {
-        summarySelectors.face_eye.textContent = hasFace ? `${eyeScore.toFixed(1)}/100` : "Awaiting face";
+        summarySelectors.face_eye.textContent = `${eyeScore.toFixed(1)}/100`;
     }
     if (summarySelectors.face_posture) {
-        summarySelectors.face_posture.textContent = hasFace ? `${postureScore.toFixed(1)}/100` : "Awaiting face";
+        summarySelectors.face_posture.textContent = `${postureScore.toFixed(1)}/100`;
     }
     if (summarySelectors.face_fatigue) {
-        summarySelectors.face_fatigue.textContent = hasFace ? `${fatigueScore.toFixed(1)}%` : "Awaiting face";
+        summarySelectors.face_fatigue.textContent = `${fatigueScore.toFixed(1)}%`;
     }
     if (summarySelectors.face_confidence) {
-        summarySelectors.face_confidence.textContent = hasFace ? `${overallScore.toFixed(1)}/100` : "Awaiting face";
+        summarySelectors.face_confidence.textContent = `${overallScore.toFixed(1)}/100`;
     }
     if (summarySelectors.overall_score_badge) {
-        summarySelectors.overall_score_badge.textContent = hasFace ? `${overallScore.toFixed(1)}/100` : "Awaiting face";
+        summarySelectors.overall_score_badge.textContent = `${overallScore.toFixed(1)}/100`;
     }
     updateDrowsinessBadge(drowsinessState);
     if (scoreHistory.length > 60) scoreHistory.shift();
     if (hasFace) scoreHistory.push(overallScore);
     renderSparkline(scoreHistory);
     if (summarySelectors.score_badges) {
-        const badges = hasFace ? [
+        const badges = [
             { label: `Attention`, value: attentionScore, css: getScoreBadgeClass(attentionScore) },
             { label: `Eyes`, value: eyeScore, css: getScoreBadgeClass(eyeScore) },
             { label: `Posture`, value: postureScore, css: getScoreBadgeClass(postureScore) },
             { label: `Fatigue`, value: fatigueScore, css: getScoreBadgeClass(100 - fatigueScore) },
-        ] : [];
+        ];
         summarySelectors.score_badges.innerHTML = badges
             .map(
                 (badge) => `
@@ -876,7 +882,7 @@ function clearCameraUnavailable() {
     }
     if (cameraAccessBanner) {
         cameraAccessBanner.innerHTML = `
-            <div class="camera-access-icon">📷</div>
+            <div class="camera-access-icon">ðŸ“·</div>
             <div>
                 <strong>Allow camera access</strong>
                 <p>Use localhost or HTTPS in the browser, then click Start camera and approve the webcam permission request.</p>
@@ -902,7 +908,7 @@ function getCameraConstraints(preferredDevice = "default") {
     if (preferredDevice && preferredDevice !== "default" && !preferredDevice.startsWith("default")) {
         return {
             ...baseConstraints,
-            deviceId: { ideal: preferredDevice },
+            deviceId: { exact: preferredDevice },
         };
     }
 
@@ -949,10 +955,23 @@ async function toggleCamera() {
         const preferredDevice = dashboardConfig.controls.camera_source || "default";
         const videoConstraints = getCameraConstraints(preferredDevice);
 
-        localStream = await navigator.mediaDevices.getUserMedia({
-            video: videoConstraints,
-            audio: false,
-        });
+        try {
+            localStream = await navigator.mediaDevices.getUserMedia({
+                video: videoConstraints,
+                audio: false,
+            });
+        } catch (error) {
+            // A saved device ID can become stale after a webcam is unplugged or
+            // browser permissions are reset. Fall back to the browser default.
+            if (preferredDevice === "default") throw error;
+            dashboardConfig.controls.camera_source = "default";
+            if (cameraSourceSelect) cameraSourceSelect.value = "default";
+            saveConfigToStorage();
+            localStream = await navigator.mediaDevices.getUserMedia({
+                video: getCameraConstraints("default"),
+                audio: false,
+            });
+        }
 
         clearCameraUnavailable();
         cameraFeed.srcObject = localStream;
@@ -971,7 +990,7 @@ async function toggleCamera() {
             cameraToggle.textContent = "Stop camera";
         }
         if (cameraContext) {
-            cameraContext.textContent = `${analysisModeSelect?.value || dashboardConfig.default_mode} live feed · face fatigue analysis active`;
+            cameraContext.textContent = `${analysisModeSelect?.value || dashboardConfig.default_mode} live feed Â· face fatigue analysis active`;
         }
     } catch (error) {
         console.error(error);
@@ -1007,17 +1026,14 @@ async function analyzeImageData(imageData, label = "camera") {
         const studentClass = document.getElementById("student-class")?.value.trim() || "";
         const studentRoll = document.getElementById("student-roll")?.value.trim() || "";
         const saveStudentScan = document.getElementById("save-student-scan")?.checked === true;
-        if (saveStudentScan && (!studentName || !studentClass || !studentRoll)) {
-            throw new Error("Enter the student's name, class, and roll number to save this scan.");
-        }
         const response = await fetch("/api/scan", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
                 image_data: imageData,
                 source: label,
-                defer_phone_detection: true,
-                ...(saveStudentScan ? { student: { name: studentName, class_name: studentClass, roll_number: studentRoll } } : {}),
+                save_scan: saveStudentScan,
+                ...(saveStudentScan && studentName && studentClass && studentRoll ? { student: { name: studentName, class_name: studentClass, roll_number: studentRoll } } : {}),
                 detection_mode: dashboardConfig.controls.student_tracking === false ? "single-user" : (dashboardConfig.controls.detection_mode || "multi-face"),
                 detection_settings: {
                     ear_blink_cutoff: Number(dashboardConfig.controls.ear_blink_cutoff ?? 0.18),
@@ -1025,7 +1041,8 @@ async function analyzeImageData(imageData, label = "camera") {
                     posture_tilt_degrees: Number(dashboardConfig.controls.posture_tilt_degrees ?? 18),
                     posture_analysis: dashboardConfig.controls.posture_analysis !== false,
                     fatigue_detection: dashboardConfig.controls.fatigue_detection !== false,
-                    phone_detection: false,
+                    phone_confidence: Number(dashboardConfig.controls.phone_confidence ?? 0.25),
+                    phone_detection: dashboardConfig.controls.phone_detection !== false,
                 },
             }),
         });
@@ -1048,13 +1065,6 @@ async function analyzeImageData(imageData, label = "camera") {
             summarySelectors.eye_engagement.textContent = `${(Number(result.eye_engagement || 0) * 100).toFixed(1)}%`;
         }
         const faceMetrics = Array.isArray(result.faces) && result.faces.length ? result.faces : (result.face_detected ? [result] : []);
-        if (dashboardConfig.controls.phone_detection !== false) {
-            if (phoneDetectionStatus) {
-                phoneDetectionStatus.classList.remove("detected", "unavailable");
-                phoneDetectionStatus.textContent = "Face scores ready · checking for phones…";
-            }
-            void analyzePhoneImage(imageData, currentPhoneScan);
-        }
         const alertThreshold = Number(dashboardConfig.controls.alert_threshold ?? 0.7);
         const fatigueAlertCount = dashboardConfig.controls.fatigue_detection === false ? 0 : faceMetrics.filter((face) =>
             Number(face.fatigue_index ?? Number(face.fatigue || 0) * 100) / 100 >= alertThreshold ||
@@ -1072,10 +1082,10 @@ async function analyzeImageData(imageData, label = "camera") {
 
         if (cameraStatus) {
             if (result.phone_detections?.length) {
-                cameraStatus.textContent = `PHONE IS DETECTED · ${result.phone_detections.length} found`;
+                cameraStatus.textContent = `PHONE IS DETECTED Â· ${result.phone_detections.length} found`;
                 cameraStatus.className = "status-pill idle";
             } else if (!result.face_detected) {
-                cameraStatus.textContent = "No face detected · retry scan";
+                cameraStatus.textContent = "No face detected Â· retry scan";
                 cameraStatus.className = "status-pill idle";
             } else {
                 cameraStatus.textContent = `${result.face_count || faceMetrics.length} face${(result.face_count || faceMetrics.length) === 1 ? "" : "s"} analyzed`;
@@ -1139,7 +1149,7 @@ async function analyzeImageData(imageData, label = "camera") {
             if (summarySelectors.phone_warning) summarySelectors.phone_warning.hidden = true;
             if (phoneOverlay) phoneOverlay.getContext("2d")?.clearRect(0, 0, phoneOverlay.width, phoneOverlay.height);
             if (dashboardConfig.controls.phone_detection !== false) {
-                if (phoneDetectionStatus) phoneDetectionStatus.textContent = "Face scan failed · trying phone check separately…";
+                if (phoneDetectionStatus) phoneDetectionStatus.textContent = "Face scan failed Â· trying phone check separatelyâ€¦";
                 void analyzePhoneImage(imageData, currentPhoneScan);
             }
         }
@@ -1154,7 +1164,7 @@ async function analyzePhoneImage(imageData, scanSequence) {
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
                 image_data: imageData,
-                confidence: Number(dashboardConfig.controls.phone_confidence ?? 0.08),
+                confidence: Number(dashboardConfig.controls.phone_confidence ?? 0.25),
             }),
         });
         const result = await response.json().catch(() => ({}));
@@ -1182,7 +1192,7 @@ function resetScanResults() {
     if (summarySelectors.room_status) summarySelectors.room_status.textContent = "Waiting";
     if (summarySelectors.status_detail) summarySelectors.status_detail.textContent = "Ready for a new capture";
     if (cameraStatus) {
-        cameraStatus.textContent = localStream ? "Camera live · ready to retake" : "Ready to scan";
+        cameraStatus.textContent = localStream ? "Camera live Â· ready to retake" : "Ready to scan";
         cameraStatus.className = localStream ? "status-pill live" : "status-pill idle";
     }
 }
@@ -1201,23 +1211,16 @@ async function capturePhotoForAnalysis() {
         const saveScan = document.getElementById("save-student-scan")?.checked === true;
         const identity = ["student-name", "student-class", "student-roll"]
             .map((id) => document.getElementById(id)?.value.trim() || "");
-        if (saveScan && identity.some((value) => !value)) {
-            if (cameraStatus) {
-                cameraStatus.textContent = "Enter student name, class, and roll number";
-                cameraStatus.className = "status-pill idle";
-            }
-            return;
-        }
         if (scanProgressOverlay) scanProgressOverlay.hidden = false;
         cameraFrame?.setAttribute("aria-busy", "true");
         if (capturePhotoButton) {
             capturePhotoButton.disabled = true;
             capturePhotoButton.dataset.originalText = capturePhotoButton.textContent;
-            capturePhotoButton.textContent = "Analyzing photo…";
+            capturePhotoButton.textContent = "Analyzing photoâ€¦";
             capturePhotoButton.setAttribute("aria-busy", "true");
         }
         if (cameraStatus) {
-            cameraStatus.textContent = "Analyzing face, fatigue, and phone cues…";
+            cameraStatus.textContent = "Analyzing face, fatigue, and phone cuesâ€¦";
             cameraStatus.className = "status-pill idle";
         }
         const canvas = document.createElement("canvas");
@@ -1319,7 +1322,7 @@ if (cameraSourceSelect) {
 }
 
 async function loadStudentScanHistory() {
-    const target = document.getElementById("student-scan-history-list");
+    const target = document.querySelector("#student-scan-history-list tbody");
     if (!target) return;
     const params = new URLSearchParams();
     const className = document.getElementById("scan-filter-class")?.value.trim();
@@ -1331,20 +1334,28 @@ async function loadStudentScanHistory() {
         if (!response.ok) throw new Error("Unable to load saved scans");
         const { scans = [] } = await response.json();
         if (!scans.length) {
-            target.innerHTML = '<p class="empty-state">No saved scans match these filters.</p>';
+            target.innerHTML = '<tr><td colspan="6" class="empty-state">No saved scans match these filters.</td></tr>';
             return;
         }
-        target.innerHTML = scans.map((scan) => `
-            <article class="student-scan-card">
-                <img src="/api/student-scans/${scan.id}/image" alt="Saved scan for ${escapeHtml(scan.name)}" loading="lazy" />
-                <div><strong>${escapeHtml(scan.name)}</strong><span>Class ${escapeHtml(scan.class_name)} · Roll ${escapeHtml(scan.roll_number)}</span>
-                    <span>${new Date(scan.timestamp).toLocaleString()}</span></div>
-                <div class="scan-comparison"><span>Fatigue <strong>${(Number(scan.fatigue) * 100).toFixed(1)}%</strong></span>
-                    <span>Attention <strong>${Number(scan.attention).toFixed(1)}%</strong></span>
-                    <span class="fatigue-level ${scan.fatigue_level.toLowerCase()}">${escapeHtml(scan.fatigue_level)} fatigue</span></div>
-            </article>`).join("");
+        target.innerHTML = scans.map((scan) => {
+            const analysis = scan.analysis || {};
+            const faces = Array.isArray(analysis.faces) ? analysis.faces : [];
+            const objects = Array.isArray(analysis.object_detections) ? analysis.object_detections : [];
+            const faceText = faces.length
+                ? faces.map((face, index) => `Face ${index + 1}: attention ${Number(face.attention || 0).toFixed(1)}, fatigue ${(Number(face.fatigue || 0) * 100).toFixed(1)}%, overall ${Number(face.overall_score ?? scan.overall_score ?? 0).toFixed(1)}`).join("<br>")
+                : "No face detected";
+            const objectText = objects.length
+                ? objects.map((item) => `${escapeHtml(item.label)} (${(Number(item.confidence || 0) * 100).toFixed(0)}%)`).join("<br>")
+                : "None detected";
+            return `<tr>
+                <td><a href="/api/student-scans/${Number(scan.id)}/image" target="_blank" rel="noopener"><img class="saved-result-thumb" src="/api/student-scans/${Number(scan.id)}/image" alt="Saved captured image" loading="lazy" /></a></td>
+                <td><strong>${escapeHtml(scan.name)}</strong><br>${escapeHtml(scan.class_name)} · ${escapeHtml(scan.roll_number)}</td>
+                <td>Overall ${Number(analysis.overall_score ?? scan.overall_score ?? 0).toFixed(1)}/100<br>Fatigue ${(Number(scan.fatigue || 0) * 100).toFixed(1)}%<br>Attention ${Number(scan.attention || 0).toFixed(1)}/100</td>
+                <td>${faceText}</td><td>${objectText}</td><td>${new Date(scan.timestamp).toLocaleString()}</td>
+            </tr>`;
+        }).join("");
     } catch (error) {
-        target.innerHTML = `<p class="empty-state">${escapeHtml(error.message)}</p>`;
+        target.innerHTML = `<tr><td colspan="6" class="empty-state">${escapeHtml(error.message)}</td></tr>`;
     }
 }
 
@@ -1372,7 +1383,7 @@ async function loadClassroomComparison() {
         }
         target.innerHTML = latest.map((scan) => `
             <article class="student-scan-card compact-scan-card">
-                <div><strong>${escapeHtml(scan.name)}</strong><span>Class ${escapeHtml(scan.class_name)} · Roll ${escapeHtml(scan.roll_number)}</span></div>
+                <div><strong>${escapeHtml(scan.name)}</strong><span>Class ${escapeHtml(scan.class_name)} Â· Roll ${escapeHtml(scan.roll_number)}</span></div>
                 <div class="scan-comparison"><span>Fatigue <strong>${(Number(scan.fatigue) * 100).toFixed(1)}%</strong></span><span>Attention <strong>${Number(scan.attention).toFixed(1)}%</strong></span><span class="fatigue-level ${scan.fatigue_level.toLowerCase()}">${escapeHtml(scan.fatigue_level)}</span></div>
             </article>`).join("");
     } catch (error) {
@@ -1387,6 +1398,13 @@ function escapeHtml(value) {
 for (const id of ["refresh-student-scans", "scan-filter-class", "scan-filter-roll"]) {
     document.getElementById(id)?.addEventListener(id === "refresh-student-scans" ? "click" : "change", loadStudentScanHistory);
 }
+document.getElementById("toggle-saved-results")?.addEventListener("click", (event) => {
+    const results = document.getElementById("student-scan-history-list");
+    const button = event.currentTarget;
+    results.hidden = !results.hidden;
+    button.setAttribute("aria-expanded", String(!results.hidden));
+    button.textContent = results.hidden ? "Show stored results" : "Hide stored results";
+});
 for (const id of ["classroom-filter-class", "classroom-filter-roll"]) {
     document.getElementById(id)?.addEventListener("change", loadClassroomComparison);
 }
@@ -1427,7 +1445,7 @@ if (postureTiltDegreesInput) {
         const value = Number(event.target.value);
         dashboardConfig.controls.posture_tilt_degrees = value;
         if (postureTiltDegreesLabel) {
-            postureTiltDegreesLabel.textContent = `${value.toFixed(0)}°`;
+            postureTiltDegreesLabel.textContent = `${value.toFixed(0)}Â°`;
         }
         saveConfigToStorage();
     });
